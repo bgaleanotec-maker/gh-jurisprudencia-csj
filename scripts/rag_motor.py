@@ -80,11 +80,11 @@ CONFIG_FILE = BASE_DIR / "config.json"
 INVALID_FLG = BASE_DIR / "indices" / "faiss_invalido.flag"
 
 # ── Modelos / parámetros ───────────────────────────────────────────────────────
-EMBED_MODEL  = "models/text-embedding-004"
+EMBED_MODEL  = "gemini-embedding-001"
 GEN_MODEL    = "gemini-2.0-flash"
 RERANK_MODEL = "gemini-2.0-flash"
 
-EMBED_DIM     = 768
+EMBED_DIM     = 768           # gemini-embedding-001 acepta MRL: 3072/1536/768
 TOP_K         = 6           # fichas finales en el contexto
 TOP_K_DENSE   = 25          # candidatos densos
 TOP_K_BM25    = 25          # candidatos BM25
@@ -342,13 +342,17 @@ class MotorRAG:
                     res = self._client.models.embed_content(
                         model=EMBED_MODEL,
                         contents=textos,
-                        config=genai_types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT"),
+                        config=genai_types.EmbedContentConfig(
+                            task_type="RETRIEVAL_DOCUMENT",
+                            output_dimensionality=EMBED_DIM,
+                        ),
                     )
                     embeddings.extend(e.values for e in res.embeddings)
                 else:
                     for t in textos:
                         r = self._client.embed_content(
-                            model=EMBED_MODEL, content=t, task_type="retrieval_document"
+                            model=EMBED_MODEL, content=t, task_type="retrieval_document",
+                            output_dimensionality=EMBED_DIM,
                         )
                         embeddings.append(r["embedding"])
                 print("✓")
@@ -393,12 +397,16 @@ class MotorRAG:
             if GENAI_NEW:
                 res = self._client.models.embed_content(
                     model=EMBED_MODEL, contents=[query],
-                    config=genai_types.EmbedContentConfig(task_type="RETRIEVAL_QUERY"),
+                    config=genai_types.EmbedContentConfig(
+                        task_type="RETRIEVAL_QUERY",
+                        output_dimensionality=EMBED_DIM,
+                    ),
                 )
                 vec = np.array([res.embeddings[0].values], dtype="float32")
             else:
                 r = self._client.embed_content(
-                    model=EMBED_MODEL, content=query, task_type="retrieval_query"
+                    model=EMBED_MODEL, content=query, task_type="retrieval_query",
+                    output_dimensionality=EMBED_DIM,
                 )
                 vec = np.array([r["embedding"]], dtype="float32")
             faiss.normalize_L2(vec)
