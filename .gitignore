@@ -1,7 +1,25 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
-data/faiss.index
-data/faiss_meta.pkl
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
 .env
+
+# Secretos (NUNCA commitear)
 config.json
+.deps_ok
+
+# Datos crudos pesados — solo locales, regenerables con el pipeline
+boletines/
+fichas/
+indices/faiss.index
+indices/faiss_invalido.flag
+indices/bm25.pkl
+
+# Sistema
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

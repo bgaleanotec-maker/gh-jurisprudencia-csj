@@ -4,14 +4,17 @@ services:
     env: python
     region: oregon
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /salud
     envVars:
       - key: GEMINI_API_KEY
-        value: AIzaSyCzCyxav33P7y5wEr0KDISh4lY5aSjhRsY
+        sync: false           # se inyecta a mano en el dashboard de Render
       - key: APP_USER
-        value: abogadosmart
+        sync: false           # opcional: usuario para Basic Auth
       - key: APP_PASS
-        value: app2026*
+        sync: false           # opcional: contraseña para Basic Auth
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.11.9
+      - key: PIP_NO_CACHE_DIR
+        value: "1"

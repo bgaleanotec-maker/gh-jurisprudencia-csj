@@ -1,9 +1,18 @@
+# Galeano Herrera | Abogados — RAG Jurisprudencia CSJ (v2)
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
 python-multipart==0.0.18
 pydantic==2.10.3
+
+# RAG / Embeddings
 google-genai==0.8.0
 faiss-cpu==1.9.0.post1
 numpy==1.26.4
+
+# HTTP (necesario para google-genai)
 httpx[socks]==0.28.1
 socksio==1.0.0
+
+# Procesamiento de boletines (solo en pipeline local)
+pymupdf>=1.24.0
+python-docx>=1.1.0
