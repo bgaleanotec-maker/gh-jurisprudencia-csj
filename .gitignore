@@ -17,6 +17,11 @@ indices/faiss.index
 indices/faiss_invalido.flag
 indices/bm25.pkl
 
+# SQLite (efímero en plan free; persiste si agregas disk)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
 # Sistema
 .DS_Store
 Thumbs.db
