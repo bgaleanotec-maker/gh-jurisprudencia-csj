@@ -1,12 +1,14 @@
 """
-SQLite — Leads y Abogados (Galeano Herrera).
+SQLite — Leads, Abogados, Citas, Eventos de tracking (Galeano Herrera).
 WAL para concurrencia, sin ORM (mantenerlo simple).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import secrets as _secrets
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -47,11 +49,48 @@ def init_db() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             whatsapp TEXT NOT NULL,             -- formato 573XXXXXXXXX
+            email TEXT UNIQUE,                  -- login del abogado
+            password_hash TEXT,                 -- sha256(salt+pwd)
+            password_salt TEXT,
             areas TEXT NOT NULL DEFAULT '[]',   -- JSON array
             active INTEGER NOT NULL DEFAULT 1,
+            available INTEGER NOT NULL DEFAULT 1,   -- toggle "no me agenden hoy"
             is_default INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS appointments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER NOT NULL REFERENCES leads(id),
+            lawyer_id INTEGER REFERENCES lawyers(id),
+            calendar_event_id TEXT,
+            meet_url TEXT,
+            html_link TEXT,
+            scheduled_at TEXT NOT NULL,         -- ISO8601 con tz
+            duration_min INTEGER NOT NULL DEFAULT 30,
+            status TEXT NOT NULL DEFAULT 'scheduled',
+                -- scheduled / cancelled_by_user / cancelled_by_lawyer / completed / no_show / rescheduled
+            reminded_24h INTEGER NOT NULL DEFAULT 0,
+            reminded_1h INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            cancelled_at TEXT,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_appt_sched ON appointments(scheduled_at);
+        CREATE INDEX IF NOT EXISTS idx_appt_lead ON appointments(lead_id);
+
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+                -- page_view / preview_started / preview_done / register / otp_verified / downloaded / meeting_booked / meeting_cancelled
+            ip TEXT,
+            user_agent TEXT,
+            referer TEXT,
+            payload TEXT,
+            ts TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(type, ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
         CREATE TABLE IF NOT EXISTS leads (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             token TEXT NOT NULL UNIQUE,
@@ -263,11 +302,227 @@ def check_rate(ip: str, max_per_hour: int = 5) -> bool:
         return True
 
 
+# ── Auth abogados (login email+password) ─────────────────────────────────────
+
+def _hash_password(pwd: str, salt: Optional[str] = None) -> tuple[str,str]:
+    salt = salt or _secrets.token_hex(16)
+    h = hashlib.sha256((salt + pwd).encode("utf-8")).hexdigest()
+    return h, salt
+
+
+def set_lawyer_password(lid: int, password: str) -> None:
+    h, salt = _hash_password(password)
+    with db() as c:
+        c.execute("UPDATE lawyers SET password_hash=?, password_salt=? WHERE id=?",
+                  (h, salt, lid))
+
+
+def set_lawyer_email(lid: int, email: str) -> None:
+    with db() as c:
+        c.execute("UPDATE lawyers SET email=? WHERE id=?", (email.strip().lower(), lid))
+
+
+def authenticate_lawyer(email: str, password: str) -> Optional[dict]:
+    if not (email and password):
+        return None
+    with db() as c:
+        r = c.execute("SELECT * FROM lawyers WHERE lower(email)=? AND active=1",
+                      (email.strip().lower(),)).fetchone()
+        if not r or not r["password_hash"] or not r["password_salt"]:
+            return None
+        expected, _ = _hash_password(password, r["password_salt"])
+        if not _secrets.compare_digest(expected, r["password_hash"]):
+            return None
+        return _lawyer_row(r)
+
+
+def get_lawyer_by_email(email: str) -> Optional[dict]:
+    with db() as c:
+        r = c.execute("SELECT * FROM lawyers WHERE lower(email)=?", (email.strip().lower(),)).fetchone()
+        return _lawyer_row(r) if r else None
+
+
+def get_lawyer(lid: int) -> Optional[dict]:
+    with db() as c:
+        r = c.execute("SELECT * FROM lawyers WHERE id=?", (lid,)).fetchone()
+        return _lawyer_row(r) if r else None
+
+
+def set_lawyer_availability(lid: int, available: bool) -> None:
+    with db() as c:
+        c.execute("UPDATE lawyers SET available=? WHERE id=?", (1 if available else 0, lid))
+
+
+def lawyer_for_assignment(area: Optional[str]) -> Optional[dict]:
+    """Como lawyer_for_area pero filtrando solo abogados disponibles."""
+    with db() as c:
+        if area:
+            for r in c.execute("SELECT * FROM lawyers WHERE active=1 AND available=1 ORDER BY is_default DESC"):
+                areas = json.loads(r["areas"] or "[]")
+                if area in areas or "*" in areas:
+                    return _lawyer_row(r)
+        r = c.execute("SELECT * FROM lawyers WHERE active=1 AND available=1 AND is_default=1").fetchone()
+        if r: return _lawyer_row(r)
+        r = c.execute("SELECT * FROM lawyers WHERE active=1 AND available=1 ORDER BY id LIMIT 1").fetchone()
+        return _lawyer_row(r) if r else None
+
+
+# ── Citas (appointments) ─────────────────────────────────────────────────────
+
+def create_appointment(lead_id: int, lawyer_id: Optional[int], scheduled_at: str,
+                       duration_min: int, calendar_event_id: str = "",
+                       meet_url: str = "", html_link: str = "") -> int:
+    with db() as c:
+        cur = c.execute(
+            """INSERT INTO appointments(lead_id, lawyer_id, scheduled_at, duration_min,
+                calendar_event_id, meet_url, html_link, status)
+               VALUES(?,?,?,?,?,?,?, 'scheduled')""",
+            (lead_id, lawyer_id, scheduled_at, duration_min, calendar_event_id, meet_url, html_link),
+        )
+        return cur.lastrowid
+
+
+def get_appointment(aid: int) -> Optional[dict]:
+    with db() as c:
+        r = c.execute("SELECT * FROM appointments WHERE id=?", (aid,)).fetchone()
+        return dict(r) if r else None
+
+
+def get_appointment_by_lead(lead_id: int) -> Optional[dict]:
+    with db() as c:
+        r = c.execute(
+            "SELECT * FROM appointments WHERE lead_id=? AND status='scheduled' ORDER BY scheduled_at DESC LIMIT 1",
+            (lead_id,)
+        ).fetchone()
+        return dict(r) if r else None
+
+
+def update_appointment_status(aid: int, status: str, notes: str = "") -> None:
+    with db() as c:
+        if status.startswith("cancelled"):
+            c.execute("UPDATE appointments SET status=?, cancelled_at=datetime('now'), notes=COALESCE(?,notes) WHERE id=?",
+                      (status, notes or None, aid))
+        else:
+            c.execute("UPDATE appointments SET status=?, notes=COALESCE(?,notes) WHERE id=?",
+                      (status, notes or None, aid))
+
+
+def update_appointment_event(aid: int, event_id: str, meet_url: str, html_link: str,
+                              scheduled_at: Optional[str] = None) -> None:
+    with db() as c:
+        if scheduled_at:
+            c.execute("UPDATE appointments SET calendar_event_id=?, meet_url=?, html_link=?, scheduled_at=?, status='scheduled' WHERE id=?",
+                      (event_id, meet_url, html_link, scheduled_at, aid))
+        else:
+            c.execute("UPDATE appointments SET calendar_event_id=?, meet_url=?, html_link=? WHERE id=?",
+                      (event_id, meet_url, html_link, aid))
+
+
+def list_appointments(status: Optional[str] = None, lawyer_id: Optional[int] = None,
+                      upcoming_only: bool = False, limit: int = 200) -> list[dict]:
+    sql = """SELECT a.*, l.name as lead_name, l.phone as lead_phone, l.email as lead_email,
+                    l.area as lead_area, l.descripcion as lead_descripcion,
+                    w.name as lawyer_name, w.email as lawyer_email
+             FROM appointments a
+             LEFT JOIN leads l ON a.lead_id = l.id
+             LEFT JOIN lawyers w ON a.lawyer_id = w.id
+             WHERE 1=1"""
+    params = []
+    if status:    sql += " AND a.status=?";   params.append(status)
+    if lawyer_id: sql += " AND a.lawyer_id=?"; params.append(lawyer_id)
+    if upcoming_only: sql += " AND a.scheduled_at > datetime('now') AND a.status='scheduled'"
+    sql += " ORDER BY a.scheduled_at ASC LIMIT ?"; params.append(limit)
+    with db() as c:
+        return [dict(r) for r in c.execute(sql, params)]
+
+
+def appointments_pending_reminder(window: str) -> list[dict]:
+    """
+    window: '24h' o '1h'. Devuelve citas que necesitan recordatorio en esa ventana.
+    """
+    with db() as c:
+        if window == "24h":
+            sql = """SELECT a.*, l.name as lead_name, l.phone as lead_phone, l.email as lead_email
+                     FROM appointments a JOIN leads l ON l.id=a.lead_id
+                     WHERE a.status='scheduled' AND a.reminded_24h=0
+                       AND a.scheduled_at > datetime('now')
+                       AND a.scheduled_at <= datetime('now','+25 hours')"""
+        elif window == "1h":
+            sql = """SELECT a.*, l.name as lead_name, l.phone as lead_phone, l.email as lead_email
+                     FROM appointments a JOIN leads l ON l.id=a.lead_id
+                     WHERE a.status='scheduled' AND a.reminded_1h=0
+                       AND a.scheduled_at > datetime('now')
+                       AND a.scheduled_at <= datetime('now','+90 minutes')"""
+        else:
+            return []
+        return [dict(r) for r in c.execute(sql)]
+
+
+def mark_appointment_reminded(aid: int, window: str) -> None:
+    col = "reminded_24h" if window == "24h" else "reminded_1h"
+    with db() as c:
+        c.execute(f"UPDATE appointments SET {col}=1 WHERE id=?", (aid,))
+
+
+# ── Tracking de eventos ───────────────────────────────────────────────────────
+
+def track_event(type_: str, ip: str = "", user_agent: str = "", referer: str = "",
+                payload: Optional[dict] = None) -> None:
+    with db() as c:
+        c.execute(
+            "INSERT INTO events(type, ip, user_agent, referer, payload) VALUES(?,?,?,?,?)",
+            (type_, ip[:64], (user_agent or "")[:200], (referer or "")[:300],
+             json.dumps(payload) if payload else None),
+        )
+
+
+def funnel_stats(days: int = 7) -> dict:
+    """Conversión por etapa en los últimos N días."""
+    with db() as c:
+        rows = c.execute(
+            f"""SELECT type, COUNT(*) c, COUNT(DISTINCT ip) uniq
+                FROM events WHERE ts > datetime('now','-{int(days)} days')
+                GROUP BY type""",
+        ).fetchall()
+        return {r["type"]: {"total": r["c"], "uniq": r["uniq"]} for r in rows}
+
+
+def daily_counts(days: int = 14) -> list[dict]:
+    """Cuántos page_view, register, downloaded por día."""
+    with db() as c:
+        rows = c.execute(
+            f"""SELECT date(ts) d, type, COUNT(*) c
+                FROM events WHERE ts > datetime('now','-{int(days)} days')
+                GROUP BY date(ts), type ORDER BY d DESC""",
+        ).fetchall()
+        agg = {}
+        for r in rows:
+            agg.setdefault(r["d"], {})[r["type"]] = r["c"]
+        return [{"date": d, **counts} for d, counts in agg.items()]
+
+
+# ── Migración suave (columnas nuevas en lawyers existentes) ──────────────────
+
+def _migrate() -> None:
+    with db() as c:
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(lawyers)")}
+        if "email" not in cols:
+            c.execute("ALTER TABLE lawyers ADD COLUMN email TEXT")
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_lawyers_email ON lawyers(email)")
+        if "password_hash" not in cols:
+            c.execute("ALTER TABLE lawyers ADD COLUMN password_hash TEXT")
+        if "password_salt" not in cols:
+            c.execute("ALTER TABLE lawyers ADD COLUMN password_salt TEXT")
+        if "available" not in cols:
+            c.execute("ALTER TABLE lawyers ADD COLUMN available INTEGER NOT NULL DEFAULT 1")
+
+
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 def bootstrap_default_lawyer() -> None:
     """Si no hay abogados y hay env LAWYER_WHATSAPP, crea uno default."""
     init_db()
+    _migrate()
     with db() as c:
         n = c.execute("SELECT COUNT(*) c FROM lawyers").fetchone()["c"]
     if n == 0:

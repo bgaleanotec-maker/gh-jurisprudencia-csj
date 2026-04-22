@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """
 ============================================================
-APP JURISPRUDENCIA — GALEANO HERRERA | ABOGADOS  (v3)
+APP JURISPRUDENCIA — GALEANO HERRERA | ABOGADOS  (v4)
 ============================================================
-- /             → Landing pública (clientes) → genera borrador → OTP → descarga
-- /admin        → Panel admin (Basic Auth) — abogados, leads, métricas
-- /pro          → App de abogado con RAG completo
-- /api/lead/*   → Endpoints de captura de leads (público)
-- /api/admin/*  → CRUD admin (Basic Auth)
-- /api/pro/*    → RAG completo (sin auth por defecto, opcional Basic Auth)
+- /                  Landing pública (clientes)
+- /admin             Panel admin (Basic Auth)
+- /pro/login         Login abogado (email + password)
+- /pro               Dashboard del abogado (sesión)
+- /api/lead/*        Captura de leads + booking de citas
+- /api/admin/*       CRUD admin
+- /api/pro/*         RAG completo (autenticado)
+- /api/track         Eventos de tracking (público, no auth)
+- /api/cron/*        Tareas programadas (Render Cron Job)
 ============================================================
 """
 
@@ -20,20 +23,19 @@ import secrets
 import sys
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from fastapi import FastAPI, HTTPException, Query, Depends, Request, status, Response
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Query, Depends, Request, Response, status, Form, Cookie
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 
-# ── Imports internos ──────────────────────────────────────────────────────────
 try:
     from rag_motor import (
         MotorRAG, obtener_api_key, guardar_config,
@@ -48,25 +50,21 @@ from app import db as db_mod
 from app import whatsapp as wa
 from app import tutela_lite as tl
 from app import ui as ui_mod
+from app import calendar_svc as cal
+from app import auth as auth_mod
 
 # ── App ────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="Jurisprudencia CSJ — Galeano Herrera | Abogados",
-    description="Plataforma de captación legal con RAG jurisprudencial.",
-    version="3.0.0",
+    title="Galeano Herrera | Abogados — Plataforma Legal",
+    description="RAG jurisprudencial + captación + agendamiento + multi-abogado.",
+    version="4.0.0",
 )
-
-app.add_middleware(
-    CORSMiddleware, allow_origins=["*"],
-    allow_methods=["*"], allow_headers=["*"],
-)
-
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
 _admin_security = HTTPBasic(auto_error=True)
-_pro_security   = HTTPBasic(auto_error=False)
 
 
 def admin_auth(creds: HTTPBasicCredentials = Depends(_admin_security)):
@@ -75,18 +73,6 @@ def admin_auth(creds: HTTPBasicCredentials = Depends(_admin_security)):
     if not (secrets.compare_digest(creds.username, user) and secrets.compare_digest(creds.password, pwd)):
         raise HTTPException(401, "Credenciales inválidas",
                             headers={"WWW-Authenticate": 'Basic realm="admin"'})
-
-
-def pro_auth(creds: Optional[HTTPBasicCredentials] = Depends(_pro_security)):
-    user = os.environ.get("APP_USER")
-    pwd  = os.environ.get("APP_PASS")
-    if not (user and pwd):
-        return  # auth deshabilitada
-    if creds is None or not (
-        secrets.compare_digest(creds.username, user) and secrets.compare_digest(creds.password, pwd)
-    ):
-        raise HTTPException(401, "Credenciales inválidas",
-                            headers={"WWW-Authenticate": 'Basic realm="pro"'})
 
 
 # ── Motor singleton ───────────────────────────────────────────────────────────
@@ -141,6 +127,11 @@ def _auto_index_background() -> None:
         print(f"[auto-index] error: {e}")
 
 
+def _ip_of(req: Request) -> str:
+    fwd = req.headers.get("x-forwarded-for")
+    return (fwd.split(",")[0].strip() if fwd else (req.client.host if req.client else "")) or "0.0.0.0"
+
+
 @app.on_event("startup")
 async def _startup_event():
     threading.Thread(target=_auto_index_background, daemon=True).start()
@@ -151,16 +142,33 @@ async def _startup_event():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
-async def landing():
+async def landing(request: Request):
+    db_mod.track_event("page_view", ip=_ip_of(request),
+                       user_agent=request.headers.get("user-agent",""),
+                       referer=request.headers.get("referer",""))
     return ui_mod.landing_html()
 
 
-# ── Modelos lead ──────────────────────────────────────────────────────────────
+# ── Tracking público ──────────────────────────────────────────────────────────
+
+class TrackReq(BaseModel):
+    type: str = Field(..., max_length=40)
+    payload: Optional[dict] = None
+
+@app.post("/api/track")
+async def track(req: TrackReq, request: Request):
+    db_mod.track_event(req.type, ip=_ip_of(request),
+                       user_agent=request.headers.get("user-agent",""),
+                       referer=request.headers.get("referer",""),
+                       payload=req.payload)
+    return {"ok": True}
+
+
+# ── Lead: preview / register / OTP / download ─────────────────────────────────
 
 class LeadPreviewReq(BaseModel):
     descripcion: str = Field(..., min_length=30, max_length=4000)
     area: Optional[str] = None
-
 
 class LeadRegisterReq(BaseModel):
     token: str
@@ -172,62 +180,50 @@ class LeadRegisterReq(BaseModel):
     consent_data:  bool
     consent_marketing: bool
 
-
 class LeadOtpReq(BaseModel):
     token: str
     otp:   str = Field(..., min_length=6, max_length=6)
-
 
 class LeadResendReq(BaseModel):
     token: str
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _ip_of(req: Request) -> str:
-    fwd = req.headers.get("x-forwarded-for")
-    return (fwd.split(",")[0].strip() if fwd else (req.client.host if req.client else "")) or "0.0.0.0"
-
-
-# ── Endpoints lead ────────────────────────────────────────────────────────────
-
 @app.post("/api/lead/preview")
 async def lead_preview(req: LeadPreviewReq, request: Request):
     ip = _ip_of(request)
     if not db_mod.check_rate(ip, max_per_hour=5):
-        raise HTTPException(429, "Has excedido el límite de borradores por hora desde tu conexión. Intenta más tarde.")
+        raise HTTPException(429, "Has excedido el límite de simulaciones por hora desde tu conexión. Intenta más tarde.")
+
+    db_mod.track_event("preview_started", ip=ip,
+                       user_agent=request.headers.get("user-agent",""),
+                       payload={"area": req.area, "len": len(req.descripcion)})
 
     motor = get_motor()
     res = tl.generar_borrador(motor, req.descripcion, area=req.area)
     if "error" in res:
-        # Mensaje amigable al usuario; código 503 si fue rate-limit
         msg = res.get("user_message") or res["error"]
         code = 503 if res["error"] == "rate_limited" else 400
         raise HTTPException(code, msg)
 
     token = uuid.uuid4().hex
     db_mod.create_lead(
-        token=token,
-        descripcion=req.descripcion,
+        token=token, descripcion=req.descripcion,
         area=res.get("area_detectada") or req.area,
-        draft=res["draft"],
-        fichas=res["fichas"],
-        ip=ip,
+        draft=res["draft"], fichas=res["fichas"], ip=ip,
         user_agent=request.headers.get("user-agent","")[:300],
     )
+    db_mod.track_event("preview_done", ip=ip,
+                       payload={"area": res.get("area_detectada"), "fichas": [f["id"] for f in res["fichas"]]})
     preview = tl.construir_preview(res["draft"], palabras_visibles=180)
     return {
-        "token": token,
-        "preview": preview,
-        "fichas": res["fichas"],
+        "token": token, "preview": preview, "fichas": res["fichas"],
         "area_detectada": res.get("area_detectada"),
-        "tokens_aprox": res.get("tokens_aprox"),
-        "cached": res.get("cached", False),
+        "tokens_aprox": res.get("tokens_aprox"), "cached": res.get("cached", False),
     }
 
 
 @app.post("/api/lead/register")
-async def lead_register(req: LeadRegisterReq):
+async def lead_register(req: LeadRegisterReq, request: Request):
     if not (req.consent_terms and req.consent_data and req.consent_marketing):
         raise HTTPException(400, "Debes aceptar las 3 autorizaciones.")
     phone_norm = wa.normalizar_telefono(req.phone)
@@ -243,8 +239,9 @@ async def lead_register(req: LeadRegisterReq):
         consent_marketing=req.consent_marketing,
     )
     if not lead:
-        raise HTTPException(404, "Sesión expirada. Vuelve a generar el borrador.")
+        raise HTTPException(404, "Sesión expirada. Vuelve a generar la simulación.")
 
+    db_mod.track_event("register", ip=_ip_of(request), payload={"area": lead.get("area")})
     otp_res = wa.crear_y_enviar_otp(phone_norm)
     out = {"ok": otp_res["ok"], "phone_normalized": phone_norm,
            "wa_sent": otp_res.get("wa_response", {}).get("sent", False)}
@@ -259,7 +256,7 @@ async def lead_register(req: LeadRegisterReq):
 async def lead_resend(req: LeadResendReq):
     lead = db_mod.get_lead_by_token(req.token)
     if not lead or lead["status"] != "pending_otp":
-        raise HTTPException(400, "No hay registro pendiente para este borrador.")
+        raise HTTPException(400, "No hay registro pendiente.")
     res = wa.crear_y_enviar_otp(lead["phone"])
     return {"ok": res["ok"], **({"otp_debug": res["otp_debug"]} if "otp_debug" in res else {})}
 
@@ -268,18 +265,16 @@ async def lead_resend(req: LeadResendReq):
 async def lead_verify(req: LeadOtpReq, request: Request):
     lead = db_mod.get_lead_by_token(req.token)
     if not lead:
-        raise HTTPException(404, "Borrador no encontrado.")
+        raise HTTPException(404, "Simulación no encontrada.")
     if lead["status"] not in ("pending_otp", "verified"):
         raise HTTPException(400, "Lead en estado inválido.")
 
     if lead["status"] == "pending_otp":
         if not wa.verificar_otp(lead["phone"], req.otp):
             raise HTTPException(400, "Código incorrecto o vencido. Reenvía y vuelve a intentar.")
-
-        lawyer = db_mod.lawyer_for_area(lead["area"])
+        lawyer = db_mod.lawyer_for_assignment(lead["area"]) or db_mod.lawyer_for_area(lead["area"])
         lead = db_mod.mark_lead_verified(req.token, lawyer["id"] if lawyer else None)
 
-        # Notificar al abogado por WhatsApp (best-effort, no bloquea descarga)
         if lawyer:
             try:
                 base = str(request.base_url).rstrip("/")
@@ -288,47 +283,180 @@ async def lead_verify(req: LeadOtpReq, request: Request):
             except Exception as e:
                 print(f"[wa-notify] error: {e}")
 
-    return {"ok": True, "download_url": f"/api/lead/download/{req.token}.docx"}
+    db_mod.track_event("otp_verified", ip=_ip_of(request), payload={"area": lead.get("area")})
+    return {
+        "ok": True,
+        "download_url": f"/api/lead/download/{req.token}.docx",
+        "calendar_enabled": cal.is_enabled(),
+    }
 
 
 @app.get("/api/lead/download/{token}.docx")
-async def lead_download(token: str):
+async def lead_download(token: str, request: Request):
     lead = db_mod.get_lead_by_token(token)
     if not lead:
-        raise HTTPException(404, "Borrador no encontrado.")
+        raise HTTPException(404, "Simulación no encontrada.")
     if lead["status"] not in ("verified", "contacted", "closed"):
         raise HTTPException(403, "Verifica tu OTP primero.")
+    db_mod.track_event("downloaded", ip=_ip_of(request))
     nombre = lead.get("name") or "cliente"
     docx_bytes = tl.borrador_a_docx(lead["draft"], nombre)
-    safe = "".join(c for c in nombre if c.isalnum() or c in " _-")[:40].replace(" ", "_") or "borrador"
+    safe = "".join(c for c in nombre if c.isalnum() or c in " _-")[:40].replace(" ", "_") or "simulacion"
     return StreamingResponse(
         iter([docx_bytes]),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": f'attachment; filename="borrador_tutela_{safe}.docx"'},
+        headers={"Content-Disposition": f'attachment; filename="simulacion_tutela_{safe}.docx"'},
     )
 
 
+# ── Booking de citas (público; requiere lead verificado) ──────────────────────
+
+class SlotsQuery(BaseModel):
+    token: str
+    days: int = Field(5, ge=1, le=10)
+
+
+@app.get("/api/lead/slots")
+async def lead_slots(token: str, days: int = 5, request: Request = None):
+    lead = db_mod.get_lead_by_token(token)
+    if not lead or lead["status"] not in ("verified","contacted","closed"):
+        raise HTTPException(403, "Verifica tu OTP primero.")
+    if not cal.is_enabled():
+        return {"ok": False, "calendar_enabled": False, "slots": []}
+    lawyer_email = None
+    if lead.get("lawyer_id"):
+        lw = db_mod.get_lawyer(lead["lawyer_id"])
+        lawyer_email = lw and lw.get("email")
+    return {"ok": True, "calendar_enabled": True,
+            "slots": cal.slots_disponibles(dias_adelante=days, lawyer_email=lawyer_email)}
+
+
+class BookReq(BaseModel):
+    token: str
+    start_iso: str
+    duration_min: int = 30
+
+
+@app.post("/api/lead/book")
+async def lead_book(req: BookReq, request: Request):
+    lead = db_mod.get_lead_by_token(req.token)
+    if not lead or lead["status"] not in ("verified","contacted","closed"):
+        raise HTTPException(403, "Verifica tu OTP primero.")
+    if not cal.is_enabled():
+        raise HTTPException(503, "Agendamiento no disponible. Te contactaremos por WhatsApp.")
+
+    existing = db_mod.get_appointment_by_lead(lead["id"])
+    if existing:
+        raise HTTPException(400, "Ya tienes una cita agendada. Cancélala o reprográmala.")
+
+    lawyer = db_mod.get_lawyer(lead["lawyer_id"]) if lead.get("lawyer_id") else db_mod.lawyer_for_assignment(lead.get("area"))
+    if not lawyer:
+        raise HTTPException(503, "No hay abogados disponibles. Te contactaremos pronto.")
+
+    res = cal.crear_cita(req.start_iso, req.duration_min, lead, lawyer,
+                         descripcion_caso=lead.get("descripcion",""))
+    if not res.get("ok"):
+        raise HTTPException(503, f"Error agendando: {res.get('error')}")
+
+    aid = db_mod.create_appointment(
+        lead_id=lead["id"], lawyer_id=lawyer["id"],
+        scheduled_at=res["start"], duration_min=req.duration_min,
+        calendar_event_id=res["event_id"], meet_url=res.get("meet_url",""),
+        html_link=res.get("html_link",""),
+    )
+    db_mod.track_event("meeting_booked", ip=_ip_of(request),
+                       payload={"start": res["start"], "lawyer": lawyer["name"]})
+
+    # Confirmación al cliente por WhatsApp
+    try:
+        s = datetime.fromisoformat(res["start"])
+        body = (
+            "✅ *Cita confirmada · Galeano Herrera*\n\n"
+            f"📅 {s.strftime('%A %d de %B %Y · %H:%M')} (hora Bogotá)\n"
+            f"⏱  Duración: {req.duration_min} min\n"
+            f"👨‍⚖️ Abogado: {lawyer['name']}\n\n"
+            f"🎥 Únete por Meet: {res.get('meet_url','(enlace en el correo)')}\n\n"
+            "Te llegará invitación al correo y recordatorios 24h y 1h antes.\n"
+            "Si necesitas cancelar, hazlo al menos 60 minutos antes."
+        )
+        wa.send_text(lead["phone"], body)
+    except Exception as e:
+        print(f"[book] confirm wa error: {e}")
+
+    return {"ok": True, "appointment_id": aid, "meet_url": res.get("meet_url"),
+            "html_link": res.get("html_link"), "start": res["start"]}
+
+
+@app.get("/api/lead/appointment")
+async def lead_appointment(token: str):
+    lead = db_mod.get_lead_by_token(token)
+    if not lead: raise HTTPException(404, "no encontrado")
+    appt = db_mod.get_appointment_by_lead(lead["id"])
+    if not appt: return {"ok": False, "appointment": None}
+    return {"ok": True, "appointment": appt, "puede_cancelar": cal.puede_cancelar(appt["scheduled_at"], 60)}
+
+
+class CancelReq(BaseModel):
+    token: str
+
+@app.post("/api/lead/cancel-appointment")
+async def lead_cancel_appt(req: CancelReq, request: Request):
+    lead = db_mod.get_lead_by_token(req.token)
+    if not lead: raise HTTPException(404, "no encontrado")
+    appt = db_mod.get_appointment_by_lead(lead["id"])
+    if not appt: raise HTTPException(404, "sin cita")
+    if not cal.puede_cancelar(appt["scheduled_at"], 60):
+        raise HTTPException(400, "Quedan menos de 60 minutos para tu cita: ya no se puede cancelar. Si no puedes asistir, escríbenos por WhatsApp para reprogramar.")
+    if appt.get("calendar_event_id"):
+        cal.cancelar_cita(appt["calendar_event_id"])
+    db_mod.update_appointment_status(appt["id"], "cancelled_by_user")
+    db_mod.track_event("meeting_cancelled", ip=_ip_of(request))
+    return {"ok": True}
+
+
+class RescheduleReq(BaseModel):
+    token: str
+    start_iso: str
+    duration_min: int = 30
+
+@app.post("/api/lead/reschedule")
+async def lead_resched(req: RescheduleReq, request: Request):
+    lead = db_mod.get_lead_by_token(req.token)
+    if not lead: raise HTTPException(404, "no encontrado")
+    appt = db_mod.get_appointment_by_lead(lead["id"])
+    if not appt: raise HTTPException(404, "sin cita")
+    if not cal.puede_cancelar(appt["scheduled_at"], 60):
+        raise HTTPException(400, "No puedes reprogramar a menos de 60 min de la cita.")
+    res = cal.reprogramar_cita(appt["calendar_event_id"], req.start_iso, req.duration_min)
+    if not res.get("ok"):
+        raise HTTPException(503, f"Error: {res.get('error')}")
+    db_mod.update_appointment_event(appt["id"], appt["calendar_event_id"],
+                                    appt.get("meet_url",""), res.get("html_link",""),
+                                    scheduled_at=req.start_iso)
+    return {"ok": True, "start": req.start_iso}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# ADMIN — Panel + REST
+# ADMIN
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/admin", response_class=HTMLResponse, dependencies=[Depends(admin_auth)])
 async def admin_panel():
     return ui_mod.admin_html()
 
-
 @app.get("/api/admin/stats", dependencies=[Depends(admin_auth)])
 async def admin_stats():
-    return db_mod.stats()
-
+    s = db_mod.stats()
+    s["funnel_7d"] = db_mod.funnel_stats(7)
+    s["daily_14d"] = db_mod.daily_counts(14)
+    return s
 
 @app.get("/api/admin/leads", dependencies=[Depends(admin_auth)])
 async def admin_list_leads(status: Optional[str] = None, limit: int = 200):
     out = db_mod.list_leads(limit=limit, status=status)
-    # Ocultamos el draft completo en el listado (pesa); se obtiene por id
-    for l in out: l["draft"] = (l.get("draft") or "")[:280] + ("…" if l.get("draft") and len(l["draft"])>280 else "")
+    for l in out:
+        l["draft"] = (l.get("draft") or "")[:280] + ("…" if l.get("draft") and len(l["draft"])>280 else "")
     return out
-
 
 @app.get("/api/admin/leads/{lid}", dependencies=[Depends(admin_auth)])
 async def admin_get_lead(lid: int):
@@ -337,7 +465,6 @@ async def admin_get_lead(lid: int):
         if l["id"] == lid:
             return l
     raise HTTPException(404, "lead no encontrado")
-
 
 class AdminPatchLead(BaseModel):
     status: Optional[str] = None
@@ -354,15 +481,15 @@ async def admin_update_lead(lid: int, body: AdminPatchLead):
             db_mod.update_lead_status(lid, body.status, notes=body.notes or "")
     return {"ok": True}
 
-
 @app.get("/api/admin/lawyers", dependencies=[Depends(admin_auth)])
 async def admin_list_lawyers():
     return db_mod.list_lawyers()
 
-
 class LawyerCreate(BaseModel):
     name: str
     whatsapp: str
+    email: Optional[str] = None
+    password: Optional[str] = None
     areas: list[str] = []
     is_default: bool = False
 
@@ -373,13 +500,35 @@ async def admin_create_lawyer(body: LawyerCreate):
         raise HTTPException(400, "WhatsApp inválido (formato 573XXXXXXXXX).")
     lid = db_mod.create_lawyer(name=body.name.strip(), whatsapp=wa_norm,
                                 areas=body.areas, is_default=body.is_default)
+    if body.email:
+        db_mod.set_lawyer_email(lid, body.email)
+    if body.password:
+        db_mod.set_lawyer_password(lid, body.password)
     return {"ok": True, "id": lid}
 
+
+class LawyerPatch(BaseModel):
+    email: Optional[str] = None
+    password: Optional[str] = None
+    available: Optional[bool] = None
+
+@app.patch("/api/admin/lawyers/{lid}", dependencies=[Depends(admin_auth)])
+async def admin_patch_lawyer(lid: int, body: LawyerPatch):
+    if body.email is not None:
+        db_mod.set_lawyer_email(lid, body.email)
+    if body.password:
+        db_mod.set_lawyer_password(lid, body.password)
+    if body.available is not None:
+        db_mod.set_lawyer_availability(lid, body.available)
+    return {"ok": True}
 
 @app.delete("/api/admin/lawyers/{lid}", dependencies=[Depends(admin_auth)])
 async def admin_delete_lawyer(lid: int):
     db_mod.delete_lawyer(lid); return {"ok": True}
 
+@app.get("/api/admin/appointments", dependencies=[Depends(admin_auth)])
+async def admin_list_appts(status: Optional[str] = None, upcoming: bool = False):
+    return db_mod.list_appointments(status=status, upcoming_only=upcoming, limit=500)
 
 @app.get("/api/admin/config", dependencies=[Depends(admin_auth)])
 async def admin_config():
@@ -387,24 +536,106 @@ async def admin_config():
     lawyer = db_mod.lawyer_for_area(None)
     return {
         "gemini_api_key": bool(obtener_api_key()),
-        "faiss_listo": motor._listo,
-        "fichas": len(motor.meta),
+        "faiss_listo": motor._listo, "fichas": len(motor.meta),
         "ultramsg": bool(wa.ULTRAMSG_INSTANCE and wa.ULTRAMSG_TOKEN),
+        "calendar": cal.is_enabled(),
         "lawyer_default": (lawyer["name"] + " (+" + lawyer["whatsapp"] + ")") if lawyer else None,
         "dev_mode": wa.DEV_MODE,
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PRO — App del abogado con RAG completo (la UI v2 anterior)
+# PRO — Login + Dashboard del abogado
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.get("/pro", response_class=HTMLResponse, dependencies=[Depends(pro_auth)])
-async def pro_app():
-    return _pro_html()
+@app.get("/pro/login", response_class=HTMLResponse)
+async def pro_login_page():
+    return ui_mod.lawyer_login_html()
 
 
-# Endpoints /api/pro/* (RAG full power)
+@app.post("/pro/login")
+async def pro_login_action(email: str = Form(...), password: str = Form(...)):
+    lw = db_mod.authenticate_lawyer(email, password)
+    if not lw:
+        return RedirectResponse("/pro/login?err=1", status_code=303)
+    token = auth_mod.make_session(lw["id"], lw["email"])
+    resp = RedirectResponse("/pro", status_code=303)
+    resp.set_cookie(auth_mod.SESSION_COOKIE, token, max_age=auth_mod.SESSION_MAX_AGE,
+                    httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/pro/logout")
+async def pro_logout():
+    resp = RedirectResponse("/pro/login", status_code=303)
+    resp.delete_cookie(auth_mod.SESSION_COOKIE)
+    return resp
+
+
+@app.get("/pro", response_class=HTMLResponse)
+async def pro_dashboard(request: Request, gh_session: Optional[str] = Cookie(default=None)):
+    data = auth_mod.parse_session(gh_session or "")
+    if not data:
+        return RedirectResponse("/pro/login", status_code=303)
+    lw = db_mod.get_lawyer(int(data["lid"]))
+    if not lw or not lw.get("active"):
+        return RedirectResponse("/pro/login", status_code=303)
+    return ui_mod.lawyer_dashboard_html(lw)
+
+
+# Endpoints del dashboard (para JS del lawyer)
+
+@app.get("/api/pro/me")
+async def pro_me(lawyer: dict = Depends(auth_mod.require_lawyer)):
+    return {"id": lawyer["id"], "name": lawyer["name"], "email": lawyer.get("email"),
+            "whatsapp": lawyer["whatsapp"], "areas": lawyer["areas"],
+            "available": bool(lawyer.get("available", 1))}
+
+
+class PatchMe(BaseModel):
+    available: Optional[bool] = None
+    password: Optional[str] = None
+
+@app.patch("/api/pro/me")
+async def pro_patch_me(body: PatchMe, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    if body.available is not None:
+        db_mod.set_lawyer_availability(lawyer["id"], body.available)
+    if body.password:
+        db_mod.set_lawyer_password(lawyer["id"], body.password)
+    return {"ok": True}
+
+
+@app.get("/api/pro/leads")
+async def pro_leads(lawyer: dict = Depends(auth_mod.require_lawyer), status: Optional[str] = None):
+    leads = db_mod.list_leads(limit=300, status=status)
+    # Filtrar a los del abogado o que cubren su área
+    areas = set(lawyer.get("areas") or [])
+    todos = "*" in areas
+    out = []
+    for l in leads:
+        if l.get("lawyer_id") == lawyer["id"]:
+            out.append(l); continue
+        if todos or (l.get("area") in areas):
+            out.append(l)
+    for l in out:
+        l["draft"] = (l.get("draft") or "")[:280] + ("…" if l.get("draft") and len(l["draft"])>280 else "")
+    return out
+
+
+@app.get("/api/pro/appointments")
+async def pro_appts(lawyer: dict = Depends(auth_mod.require_lawyer), upcoming: bool = True):
+    return db_mod.list_appointments(lawyer_id=lawyer["id"], upcoming_only=upcoming, limit=200)
+
+
+@app.get("/api/pro/leads/{lid}")
+async def pro_lead_detail(lid: int, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    leads = db_mod.list_leads(limit=2000)
+    for l in leads:
+        if l["id"] == lid: return l
+    raise HTTPException(404, "no encontrado")
+
+
+# ── Endpoints RAG completo (autenticado por sesión) ──────────────────────────
 
 class ConsultaRequest(BaseModel):
     pregunta: str = Field(..., min_length=3)
@@ -428,8 +659,8 @@ class TutelaRequest(BaseModel):
     area: Optional[str] = None
 
 
-@app.post("/api/pro/consultar", dependencies=[Depends(pro_auth)])
-async def pro_consultar(req: ConsultaRequest):
+@app.post("/api/pro/consultar")
+async def pro_consultar(req: ConsultaRequest, lawyer: dict = Depends(auth_mod.require_lawyer)):
     motor = get_motor()
     res = motor.consultar(req.pregunta, filtro_area=req.area, filtro_anio=req.anio,
                           filtro_sala=req.sala, modo="respuesta", rerank=req.rerank,
@@ -437,38 +668,38 @@ async def pro_consultar(req: ConsultaRequest):
     if "error" in res: raise HTTPException(500, res["error"])
     return res
 
-@app.post("/api/pro/analizar-caso", dependencies=[Depends(pro_auth)])
-async def pro_caso(req: CasoRequest):
+@app.post("/api/pro/analizar-caso")
+async def pro_caso(req: CasoRequest, lawyer: dict = Depends(auth_mod.require_lawyer)):
     motor = get_motor()
     q = req.descripcion if not req.nombre_cliente else f"Cliente: {req.nombre_cliente}. {req.descripcion}"
     res = motor.consultar(q, filtro_area=req.area, modo="caso")
     if "error" in res: raise HTTPException(500, res["error"])
     return res
 
-@app.post("/api/pro/generar-tutela", dependencies=[Depends(pro_auth)])
-async def pro_tutela(req: TutelaRequest):
+@app.post("/api/pro/generar-tutela")
+async def pro_tutela(req: TutelaRequest, lawyer: dict = Depends(auth_mod.require_lawyer)):
     motor = get_motor()
     datos = (
-        f"Accionante: {req.nombre}, CC {req.cedula}. "
-        f"Accionado: {req.accionado}. "
-        f"Derecho vulnerado: {req.derecho_vulnerado}. "
-        f"Hechos: {req.hechos}"
+        f"Accionante: {req.nombre}, CC {req.cedula}. Accionado: {req.accionado}. "
+        f"Derecho vulnerado: {req.derecho_vulnerado}. Hechos: {req.hechos}"
     )
     res = motor.consultar(datos, filtro_area=req.area, modo="tutela")
     if "error" in res: raise HTTPException(500, res["error"])
     return res
 
-@app.get("/api/pro/linea-jurisprudencial", dependencies=[Depends(pro_auth)])
-async def pro_linea(tema: str = Query(..., min_length=3), area: Optional[str] = None):
+@app.get("/api/pro/linea-jurisprudencial")
+async def pro_linea(tema: str = Query(..., min_length=3), area: Optional[str] = None,
+                    lawyer: dict = Depends(auth_mod.require_lawyer)):
     motor = get_motor()
     res = motor.consultar(tema, filtro_area=area, modo="linea")
     if "error" in res: raise HTTPException(500, res["error"])
     return res
 
-@app.get("/api/pro/buscar", dependencies=[Depends(pro_auth)])
+@app.get("/api/pro/buscar")
 async def pro_buscar(q: str = Query(..., min_length=2), area: Optional[str] = None,
                      anio: Optional[int] = None, sala: Optional[str] = None,
-                     top_k: int = Query(10, le=25)):
+                     top_k: int = Query(10, le=25),
+                     lawyer: dict = Depends(auth_mod.require_lawyer)):
     try:
         motor = get_motor()
     except HTTPException:
@@ -480,12 +711,48 @@ async def pro_buscar(q: str = Query(..., min_length=2), area: Optional[str] = No
                             "score": f.get("score", 0),
                             "preview": (f.get("texto_busqueda","") or "")[:240]} for f in fichas]}
 
-@app.get("/api/pro/estadisticas", dependencies=[Depends(pro_auth)])
-async def pro_stats():
+@app.get("/api/pro/estadisticas")
+async def pro_stats(lawyer: dict = Depends(auth_mod.require_lawyer)):
     return get_motor_lite().estadisticas()
 
 
-# ── Salud / health ────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# CRON — recordatorios (Render Cron Job o curl manual)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _cron_token_check(t: str):
+    expected = os.environ.get("CRON_TOKEN", os.environ.get("SECRET_KEY",""))
+    if not expected or not secrets.compare_digest(t or "", expected):
+        raise HTTPException(401, "cron token inválido")
+
+
+@app.get("/api/cron/reminders")
+async def cron_reminders(t: str = ""):
+    _cron_token_check(t)
+    sent = {"24h": 0, "1h": 0}
+    for w in ("24h", "1h"):
+        for appt in db_mod.appointments_pending_reminder(w):
+            try:
+                s = datetime.fromisoformat(appt["scheduled_at"])
+                cuerpo = (
+                    "🔔 *Recordatorio de cita · Galeano Herrera*\n\n"
+                    f"📅 {s.strftime('%A %d de %B %Y · %H:%M')} (Bogotá)\n"
+                    f"🎥 Únete por Meet: {appt.get('meet_url','(ver correo)')}\n\n"
+                    + ("Tu cita es en aproximadamente *24 horas*.\n"
+                       "Si no puedes asistir, cancela ahora desde el sitio."
+                       if w == "24h" else
+                       "Tu cita empieza en aproximadamente *1 hora*.\n"
+                       "Ya no es posible cancelar (ventana de 60 min).")
+                )
+                wa.send_text(appt["lead_phone"], cuerpo)
+                db_mod.mark_appointment_reminded(appt["id"], w)
+                sent[w] += 1
+            except Exception as e:
+                print(f"[cron] reminder {w} error: {e}")
+    return {"ok": True, "sent": sent}
+
+
+# ── Salud ─────────────────────────────────────────────────────────────────────
 
 @app.get("/salud")
 async def salud():
@@ -493,188 +760,14 @@ async def salud():
         return {"status": "rag_off", "timestamp": datetime.now().isoformat()}
     motor = get_motor_lite()
     return {
-        "status"      : "ok",
-        "timestamp"   : datetime.now().isoformat(),
-        "faiss_listo" : motor._listo,
-        "bm25_listo"  : motor.bm25 is not None,
-        "fichas"      : len(motor.meta),
-        "api_key"     : bool(obtener_api_key()),
-        "ultramsg"    : bool(wa.ULTRAMSG_INSTANCE and wa.ULTRAMSG_TOKEN),
-        "version"     : app.version,
+        "status": "ok", "timestamp": datetime.now().isoformat(),
+        "faiss_listo": motor._listo, "bm25_listo": motor.bm25 is not None,
+        "fichas": len(motor.meta),
+        "api_key": bool(obtener_api_key()),
+        "ultramsg": bool(wa.ULTRAMSG_INSTANCE and wa.ULTRAMSG_TOKEN),
+        "calendar": cal.is_enabled(),
+        "version": app.version,
     }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# UI Pro (HTML — la v2 anterior, llamando ahora a /api/pro/*)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _pro_html() -> str:
-    return """<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Galeano Herrera | App Pro · Jurisprudencia CSJ</title>
-<style>
-  :root{--azul:#002347;--oro:#C5A059;--gris:#f4f6f9;--texto:#1a2332;}
-  *{box-sizing:border-box;margin:0;padding:0;}
-  body{font-family:'Segoe UI',sans-serif;background:var(--gris);color:var(--texto);}
-  header{background:var(--azul);color:#fff;padding:16px 32px;display:flex;align-items:center;
-         gap:16px;border-bottom:3px solid var(--oro);}
-  .logo{font-size:24px;font-weight:800;letter-spacing:-1px;}.logo span{color:var(--oro);}
-  .subtitle{font-size:12px;opacity:.75;letter-spacing:2px;text-transform:uppercase;}
-  .container{max-width:1100px;margin:0 auto;padding:24px 16px;}
-  .tabs{display:flex;gap:4px;margin-bottom:24px;border-bottom:2px solid var(--azul);flex-wrap:wrap;}
-  .tab{padding:10px 18px;cursor:pointer;border-radius:6px 6px 0 0;border:2px solid transparent;
-       border-bottom:none;font-weight:600;font-size:13px;color:var(--azul);background:#fff;}
-  .tab:hover{background:#e8ecf3;} .tab.active{background:var(--azul);color:#fff;}
-  .panel{display:none;} .panel.active{display:block;}
-  .card{background:#fff;border-radius:10px;padding:24px;box-shadow:0 2px 12px rgba(0,35,71,.08);margin-bottom:20px;}
-  label{display:block;font-size:12px;font-weight:700;color:var(--azul);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
-  input,textarea,select{width:100%;padding:10px 14px;border:2px solid #dce3ef;border-radius:6px;font-size:14px;color:var(--texto);font-family:inherit;}
-  textarea{resize:vertical;min-height:90px;}
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
-  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
-  @media(max-width:600px){.row,.row3{grid-template-columns:1fr;}}
-  .btn{background:var(--azul);color:#fff;border:none;padding:12px 28px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;}
-  .btn:hover{background:#003d7a;} .btn.gold{background:var(--oro);} .btn.gold:hover{background:#a88440;}
-  .result{background:#f0f4fa;border-left:4px solid var(--azul);padding:16px;border-radius:0 6px 6px 0;
-          white-space:pre-wrap;font-size:14px;line-height:1.65;max-height:600px;overflow-y:auto;display:none;}
-  .result.visible{display:block;}
-  .fuentes{font-size:12px;color:#666;margin-top:10px;padding:8px 12px;background:#fff;border-radius:4px;border:1px solid #dce3ef;display:none;}
-  .fuentes b{color:var(--azul);}
-  .spinner{display:none;margin:16px 0;color:var(--azul);font-size:14px;} .spinner.visible{display:block;}
-  .badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;margin:2px;background:#e3f0ff;color:#004a9f;}
-  h3{font-size:16px;color:var(--azul);margin-bottom:16px;}
-  .form-group{margin-bottom:16px;}
-  .stat{display:inline-block;background:#fff;border:1px solid #dce3ef;border-radius:6px;padding:8px 14px;margin:4px;font-size:13px;color:var(--azul);font-weight:700;}
-  .stat span{color:var(--oro);}
-</style></head><body>
-<header>
-  <div><div class="logo">Galeano <span>Herrera</span></div>
-  <div class="subtitle">App Pro · RAG Híbrido · Uso interno</div></div>
-  <div style="margin-left:auto"><a href="/admin" style="color:var(--oro);font-size:13px;text-decoration:none">⚙ Admin</a> · <a href="/" style="color:var(--oro);font-size:13px;text-decoration:none">Landing</a></div>
-</header>
-<div class="container">
-  <div id="stats-bar"></div>
-  <div class="tabs">
-    <div class="tab active" onclick="showTab('consultar')">🔍 Consultar</div>
-    <div class="tab" onclick="showTab('caso')">📋 Analizar Caso</div>
-    <div class="tab" onclick="showTab('tutela')">⚖ Tutela</div>
-    <div class="tab" onclick="showTab('linea')">📈 Línea</div>
-    <div class="tab" onclick="showTab('buscar')">🗂 Buscar</div>
-  </div>
-  <div id="panel-consultar" class="panel active"><div class="card"><h3>Consulta Jurisprudencial</h3>
-    <div class="form-group"><label>Pregunta</label>
-      <textarea id="q-pregunta" placeholder="Ej: EPS Sanitas niega cirugía urgente..."></textarea></div>
-    <div class="row3">
-      <div><label>Área</label><select id="q-area">
-        <option value="">Todas</option><option value="salud">Salud</option><option value="pensiones">Pensiones</option>
-        <option value="laboral">Laboral</option><option value="accidentes">Accidentes</option>
-        <option value="insolvencia">Insolvencia</option><option value="derechos_fundamentales">DD.FF.</option></select></div>
-      <div><label>Sala</label><select id="q-sala">
-        <option value="">Todas</option><option value="CIVIL">Civil</option><option value="LABORAL">Laboral</option>
-        <option value="PENAL">Penal</option><option value="PLENA">Plena</option><option value="INSOLVENCIA">Insolvencia</option></select></div>
-      <div><label>Año</label><input type="number" id="q-anio" min="2014" max="2030" placeholder="ej. 2024"></div>
-    </div><br>
-    <button class="btn" onclick="consultar()">Consultar</button>
-    <div class="spinner" id="q-spinner">⏳ Generando análisis…</div>
-    <div class="result" id="q-result"></div><div class="fuentes" id="q-fuentes"></div>
-  </div></div>
-  <div id="panel-caso" class="panel"><div class="card"><h3>Analizar Caso (Protocolo Galeano Herrera)</h3>
-    <div class="row">
-      <div class="form-group"><label>Cliente</label><input id="caso-nombre" placeholder="María García"></div>
-      <div class="form-group"><label>Área</label><select id="caso-area"><option value="">Auto</option>
-        <option value="salud">Salud</option><option value="pensiones">Pensiones</option>
-        <option value="laboral">Laboral</option><option value="accidentes">Accidentes</option>
-        <option value="insolvencia">Insolvencia</option></select></div></div>
-    <div class="form-group"><label>Descripción</label><textarea id="caso-desc" style="min-height:130px"></textarea></div>
-    <button class="btn" onclick="analizarCaso()">Analizar</button>
-    <div class="spinner" id="caso-spinner">⏳ Analizando…</div>
-    <div class="result" id="caso-result"></div><div class="fuentes" id="caso-fuentes"></div>
-  </div></div>
-  <div id="panel-tutela" class="panel"><div class="card"><h3>Generar Tutela</h3>
-    <div class="row">
-      <div class="form-group"><label>Nombre</label><input id="t-nombre"></div>
-      <div class="form-group"><label>Cédula</label><input id="t-cedula"></div></div>
-    <div class="row">
-      <div class="form-group"><label>Accionado</label><input id="t-accionado"></div>
-      <div class="form-group"><label>Derecho vulnerado</label><input id="t-derecho"></div></div>
-    <div class="form-group"><label>Hechos</label><textarea id="t-hechos" style="min-height:130px"></textarea></div>
-    <div class="form-group"><label>Área</label><select id="t-area">
-      <option value="salud">Salud</option><option value="pensiones">Pensiones</option>
-      <option value="laboral">Laboral</option><option value="derechos_fundamentales">DD.FF.</option></select></div>
-    <button class="btn gold" onclick="generarTutela()">⚖ Generar Borrador</button>
-    <div class="spinner" id="t-spinner">⏳ Generando…</div>
-    <div class="result" id="t-result"></div><div class="fuentes" id="t-fuentes"></div>
-  </div></div>
-  <div id="panel-linea" class="panel"><div class="card"><h3>Línea Jurisprudencial</h3>
-    <div class="form-group"><label>Tema</label><input id="l-tema"></div>
-    <div class="row"><div><label>Área</label><select id="l-area"><option value="">Todas</option>
-      <option value="salud">Salud</option><option value="pensiones">Pensiones</option>
-      <option value="laboral">Laboral</option><option value="accidentes">Accidentes</option>
-      <option value="insolvencia">Insolvencia</option></select></div>
-      <div style="display:flex;align-items:flex-end"><button class="btn" onclick="explorarLinea()">Explorar</button></div></div>
-    <div class="spinner" id="l-spinner">⏳ Analizando…</div>
-    <div class="result" id="l-result"></div><div class="fuentes" id="l-fuentes"></div>
-  </div></div>
-  <div id="panel-buscar" class="panel"><div class="card"><h3>Búsqueda híbrida</h3>
-    <div class="row"><div class="form-group"><label>Búsqueda</label><input id="b-query"></div>
-      <div style="display:flex;align-items:flex-end"><button class="btn" onclick="buscarFichas()">Buscar</button></div></div>
-    <div class="spinner" id="b-spinner">⏳…</div><div id="b-result"></div>
-  </div></div>
-</div>
-<script>
-const API='/api/pro';
-function showTab(n){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
-  document.querySelector(`[onclick="showTab('${n}')"]`).classList.add('active');
-  document.getElementById('panel-'+n).classList.add('active');}
-function spin(id,on){document.getElementById(id).className='spinner'+(on?' visible':'');}
-function showResult(id,t){const e=document.getElementById(id);e.textContent=t;e.className='result visible';}
-function showFuentes(id,fichas){const e=document.getElementById(id);
-  if(!fichas||!fichas.length){e.style.display='none';return;}
-  e.style.display='block';
-  e.innerHTML='<b>Fichas usadas:</b> '+fichas.map(f=>`<span class="badge">${f.id}</span>`).join(' ');}
-async function post(u,d){const r=await fetch(API+u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});
-  if(!r.ok){const e=await r.json();throw new Error(e.detail||'Error');}return r.json();}
-async function get(u){const r=await fetch(API+u);if(!r.ok){const e=await r.json();throw new Error(e.detail||'Error');}return r.json();}
-async function consultar(){const p=document.getElementById('q-pregunta').value.trim();if(!p)return;
-  spin('q-spinner',true);try{const d=await post('/consultar',{pregunta:p,
-    area:document.getElementById('q-area').value||null,sala:document.getElementById('q-sala').value||null,
-    anio:parseInt(document.getElementById('q-anio').value)||null});
-    showResult('q-result',d.respuesta);showFuentes('q-fuentes',d.fichas_usadas);}
-  catch(e){showResult('q-result','❌ '+e.message);}spin('q-spinner',false);}
-async function analizarCaso(){const d=document.getElementById('caso-desc').value.trim();if(!d)return;
-  spin('caso-spinner',true);try{const r=await post('/analizar-caso',{descripcion:d,
-    nombre_cliente:document.getElementById('caso-nombre').value,
-    area:document.getElementById('caso-area').value||null});
-    showResult('caso-result',r.respuesta);showFuentes('caso-fuentes',r.fichas_usadas);}
-  catch(e){showResult('caso-result','❌ '+e.message);}spin('caso-spinner',false);}
-async function generarTutela(){const n=document.getElementById('t-nombre').value.trim();
-  const h=document.getElementById('t-hechos').value.trim();if(!n||!h)return alert('Nombre y hechos');
-  spin('t-spinner',true);try{const r=await post('/generar-tutela',{nombre:n,
-    cedula:document.getElementById('t-cedula').value,accionado:document.getElementById('t-accionado').value,
-    hechos:h,derecho_vulnerado:document.getElementById('t-derecho').value,
-    area:document.getElementById('t-area').value});
-    showResult('t-result',r.respuesta);showFuentes('t-fuentes',r.fichas_usadas);}
-  catch(e){showResult('t-result','❌ '+e.message);}spin('t-spinner',false);}
-async function explorarLinea(){const t=document.getElementById('l-tema').value.trim();if(!t)return;
-  spin('l-spinner',true);try{const a=document.getElementById('l-area').value;
-    const r=await get('/linea-jurisprudencial?tema='+encodeURIComponent(t)+(a?'&area='+a:''));
-    showResult('l-result',r.respuesta);showFuentes('l-fuentes',r.fichas_usadas);}
-  catch(e){showResult('l-result','❌ '+e.message);}spin('l-spinner',false);}
-async function buscarFichas(){const q=document.getElementById('b-query').value.trim();if(!q)return;
-  spin('b-spinner',true);try{const d=await get('/buscar?q='+encodeURIComponent(q)+'&top_k=10');
-    document.getElementById('b-result').innerHTML=d.resultados.map(r=>`<div class="card" style="margin-bottom:10px;padding:14px">
-      <div style="display:flex;justify-content:space-between"><strong style="color:#002347">${r.id}</strong>
-      <span style="font-size:12px;color:#888">${r.anio||''} · ${r.sala||''}</span></div>
-      <div>${(r.areas||[]).map(a=>`<span class="badge">${a}</span>`).join('')}</div>
-      <div style="font-size:13px;margin-top:6px">${r.preview}…</div></div>`).join('');}
-  catch(e){document.getElementById('b-result').innerHTML='<p style="color:red">❌ '+e.message+'</p>';}spin('b-spinner',false);}
-window.onload=async()=>{try{const s=await get('/estadisticas');
-  document.getElementById('stats-bar').innerHTML=
-    `<span class="stat">📚 <span>${s.total_fichas}</span> fichas</span>`+
-    `<span class="stat">🧠 FAISS: <span>${s.faiss_listo?'on':'off'}</span></span>`;}catch(e){}};
-</script></body></html>"""
 
 
 # ── Entrada directa ───────────────────────────────────────────────────────────
