@@ -48,6 +48,9 @@ except Exception as e:
     RAG_OK = False
     print(f"⚠ Motor RAG no disponible: {e}")
 
+import asyncio
+import threading
+
 # ── App ────────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
@@ -100,10 +103,44 @@ def get_motor() -> "MotorRAG":
 
 
 def get_motor_lite() -> "MotorRAG":
-    global _motor_lite
+    global _motor_lite, _motor
+    # Si el motor completo ya está cargado y con FAISS, úsalo para reportar
+    if _motor is not None and _motor._listo:
+        return _motor
     if _motor_lite is None:
         _motor_lite = MotorRAG(solo_busqueda=True)
+    elif not _motor_lite._listo and FAISS_INDEX.exists() and not INVALID_FLG.exists():
+        # Recargar si entretanto se generó el índice
+        _motor_lite = MotorRAG(solo_busqueda=True)
     return _motor_lite
+
+
+def _auto_index_background() -> None:
+    """En arranque, si hay API key pero no hay FAISS válido, indexa una vez."""
+    if not RAG_OK:
+        return
+    api_key = obtener_api_key()
+    if not api_key:
+        print("[auto-index] sin GEMINI_API_KEY; salto.")
+        return
+    if FAISS_INDEX.exists() and not INVALID_FLG.exists():
+        print("[auto-index] FAISS ya existe; salto.")
+        return
+    try:
+        print("[auto-index] generando índice FAISS al arranque...")
+        m = MotorRAG(api_key=api_key)
+        n = m.indexar()
+        global _motor
+        _motor = m
+        print(f"[auto-index] listo: {n} fichas, faiss_listo={m._listo}")
+    except Exception as e:
+        print(f"[auto-index] error: {e}")
+
+
+@app.on_event("startup")
+async def _startup_event():
+    # Lanzar en thread para no bloquear el bind del puerto (Render mata si no escuchas en 60s)
+    threading.Thread(target=_auto_index_background, daemon=True).start()
 
 
 # ── Modelos ────────────────────────────────────────────────────────────────────
