@@ -200,7 +200,10 @@ async def lead_preview(req: LeadPreviewReq, request: Request):
     motor = get_motor()
     res = tl.generar_borrador(motor, req.descripcion, area=req.area)
     if "error" in res:
-        raise HTTPException(400, res["error"])
+        # Mensaje amigable al usuario; código 503 si fue rate-limit
+        msg = res.get("user_message") or res["error"]
+        code = 503 if res["error"] == "rate_limited" else 400
+        raise HTTPException(code, msg)
 
     token = uuid.uuid4().hex
     db_mod.create_lead(

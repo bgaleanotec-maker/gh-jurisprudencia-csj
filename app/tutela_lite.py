@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+import time
 import threading
 from collections import OrderedDict
 from typing import Optional
@@ -202,19 +203,44 @@ def generar_borrador(motor, descripcion: str, area: Optional[str] = None,
     contexto = motor._construir_contexto(fichas)
     prompt   = _prompt_publico(descripcion, contexto, datos_cliente)
 
-    try:
-        from google.genai import types as genai_types
-        r = motor._client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
-            config=genai_types.GenerateContentConfig(
-                temperature=0.15,
-                max_output_tokens=1300,
-            ),
-        )
-        texto = (r.text or "").strip()
-    except Exception as e:
-        return {"error": f"Error generando: {e}", "draft": "", "fichas": []}
+    from google.genai import types as genai_types
+    texto = ""
+    last_err = None
+    for intento in range(3):
+        try:
+            r = motor._client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.15,
+                    max_output_tokens=1300,
+                ),
+            )
+            texto = (r.text or "").strip()
+            break
+        except Exception as e:
+            last_err = e
+            msg = str(e)
+            # 429 / RESOURCE_EXHAUSTED → backoff exponencial
+            if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
+                if intento < 2:
+                    time.sleep(2 ** intento + 1.0)   # 2s, 3s
+                    continue
+                return {
+                    "error": "rate_limited",
+                    "user_message": (
+                        "Estamos atendiendo a muchos usuarios en este momento. "
+                        "Intenta de nuevo en 1 minuto. Si el problema persiste, "
+                        "contáctanos directamente por WhatsApp."
+                    ),
+                    "draft": "", "fichas": [],
+                }
+            # Otros errores: no reintentamos
+            return {"error": f"Error generando: {e}", "user_message": "Hubo un problema técnico. Intenta de nuevo en unos minutos.", "draft": "", "fichas": []}
+
+    if not texto:
+        return {"error": str(last_err) if last_err else "Sin respuesta del modelo",
+                "user_message": "No se pudo generar el borrador. Intenta de nuevo.", "draft": "", "fichas": []}
 
     draft = DISCLAIMER + texto + (
         "\n\n─────────────────────────────────────────\n"
