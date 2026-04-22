@@ -79,6 +79,16 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_appt_sched ON appointments(scheduled_at);
         CREATE INDEX IF NOT EXISTS idx_appt_lead ON appointments(lead_id);
 
+        CREATE TABLE IF NOT EXISTS lawyer_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lawyer_id INTEGER NOT NULL REFERENCES lawyers(id) ON DELETE CASCADE,
+            start_at TEXT NOT NULL,
+            end_at TEXT NOT NULL,
+            reason TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_blocks_lawyer ON lawyer_blocks(lawyer_id, start_at);
+
         CREATE TABLE IF NOT EXISTS events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             type TEXT NOT NULL,
@@ -370,14 +380,15 @@ def lawyer_for_assignment(area: Optional[str]) -> Optional[dict]:
 # ── Citas (appointments) ─────────────────────────────────────────────────────
 
 def create_appointment(lead_id: int, lawyer_id: Optional[int], scheduled_at: str,
-                       duration_min: int, calendar_event_id: str = "",
-                       meet_url: str = "", html_link: str = "") -> int:
+                       duration_min: int, modality: str = "whatsapp",
+                       meet_url: str = "", notes: str = "") -> int:
     with db() as c:
         cur = c.execute(
             """INSERT INTO appointments(lead_id, lawyer_id, scheduled_at, duration_min,
-                calendar_event_id, meet_url, html_link, status)
-               VALUES(?,?,?,?,?,?,?, 'scheduled')""",
-            (lead_id, lawyer_id, scheduled_at, duration_min, calendar_event_id, meet_url, html_link),
+                meet_url, status, notes)
+               VALUES(?,?,?,?,?, 'scheduled', ?)""",
+            (lead_id, lawyer_id, scheduled_at, duration_min, meet_url,
+             (notes or f"Modalidad: {modality}")),
         )
         return cur.lastrowid
 
@@ -407,15 +418,17 @@ def update_appointment_status(aid: int, status: str, notes: str = "") -> None:
                       (status, notes or None, aid))
 
 
-def update_appointment_event(aid: int, event_id: str, meet_url: str, html_link: str,
-                              scheduled_at: Optional[str] = None) -> None:
+def update_appointment_time(aid: int, new_start: str) -> None:
     with db() as c:
-        if scheduled_at:
-            c.execute("UPDATE appointments SET calendar_event_id=?, meet_url=?, html_link=?, scheduled_at=?, status='scheduled' WHERE id=?",
-                      (event_id, meet_url, html_link, scheduled_at, aid))
-        else:
-            c.execute("UPDATE appointments SET calendar_event_id=?, meet_url=?, html_link=? WHERE id=?",
-                      (event_id, meet_url, html_link, aid))
+        c.execute(
+            "UPDATE appointments SET scheduled_at=?, status='scheduled', reminded_24h=0, reminded_1h=0 WHERE id=?",
+            (new_start, aid),
+        )
+
+
+def update_appointment_meet(aid: int, meet_url: str) -> None:
+    with db() as c:
+        c.execute("UPDATE appointments SET meet_url=? WHERE id=?", (meet_url, aid))
 
 
 def list_appointments(status: Optional[str] = None, lawyer_id: Optional[int] = None,
@@ -462,6 +475,33 @@ def mark_appointment_reminded(aid: int, window: str) -> None:
     col = "reminded_24h" if window == "24h" else "reminded_1h"
     with db() as c:
         c.execute(f"UPDATE appointments SET {col}=1 WHERE id=?", (aid,))
+
+
+# ── Bloqueos manuales del abogado ────────────────────────────────────────────
+
+def create_block(lawyer_id: int, start_at: str, end_at: str, reason: str = "") -> int:
+    with db() as c:
+        cur = c.execute(
+            "INSERT INTO lawyer_blocks(lawyer_id, start_at, end_at, reason) VALUES(?,?,?,?)",
+            (lawyer_id, start_at, end_at, reason),
+        )
+        return cur.lastrowid
+
+
+def delete_block(bid: int, lawyer_id: Optional[int] = None) -> None:
+    with db() as c:
+        if lawyer_id is not None:
+            c.execute("DELETE FROM lawyer_blocks WHERE id=? AND lawyer_id=?", (bid, lawyer_id))
+        else:
+            c.execute("DELETE FROM lawyer_blocks WHERE id=?", (bid,))
+
+
+def list_blocks(lawyer_id: int) -> list[dict]:
+    with db() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM lawyer_blocks WHERE lawyer_id=? AND end_at > datetime('now') ORDER BY start_at",
+            (lawyer_id,),
+        )]
 
 
 # ── Tracking de eventos ───────────────────────────────────────────────────────

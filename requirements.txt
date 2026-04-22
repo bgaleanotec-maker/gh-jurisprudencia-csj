@@ -13,11 +13,6 @@ numpy==1.26.4
 httpx[socks]==0.28.1
 socksio==1.0.0
 
-# Google Calendar / Meet
-google-api-python-client>=2.150.0
-google-auth>=2.30.0
-google-auth-httplib2>=0.2.0
-
 # Auth (sesiones firmadas para multi-abogado)
 itsdangerous>=2.2.0
 

@@ -363,8 +363,9 @@ def landing_html() -> str:
     <button class="btn gold" id="btn-descargar" style="margin-bottom:14px">📥 Descargar simulación (.docx)</button>
 
     <div id="agenda-block">
-      <h3 style="margin-top:24px">🗓️ Agenda tu cita gratuita</h3>
-      <p class="muted" style="margin-bottom:16px">Habla 30 minutos por <b>Google Meet</b> con un abogado especializado. Sin costo, sin compromiso.</p>
+      <h3 style="margin-top:24px">🗓️ Agenda tu llamada gratuita</h3>
+      <p class="muted" style="margin-bottom:16px">Habla 30 minutos por <b>WhatsApp</b> con un abogado especializado. Sin costo, sin compromiso. El abogado te marca a la hora acordada.</p>
+      <div id="lawyer-info"></div>
       <div id="slots-cont"><div class="spinner on"><div class="dot"></div><div class="dot"></div><div class="dot"></div><br><br>Buscando horarios disponibles…</div></div>
       <button class="btn green" id="btn-confirmar-cita" style="display:none;margin-top:14px">📅 Confirmar cita</button>
       <div id="agenda-result"></div>
@@ -383,7 +384,8 @@ def landing_html() -> str:
       <div id="cita-info" style="margin-top:14px;font-size:16px"></div>
     </div>
     <div class="alert alert-info" style="margin-top:14px">
-      <b>📧 Recibirás:</b> invitación al correo + recordatorios por WhatsApp 24h y 1h antes.<br>
+      <b>📱 El abogado te llamará por WhatsApp</b> a este número a la hora acordada.<br>
+      <b>🔔 Recordatorios:</b> 24 h y 1 h antes.<br>
       <b>⏰ Cancelación:</b> hasta 60 minutos antes de la cita.
     </div>
     <button class="btn outline" onclick="window.location.href='/'">Volver al inicio</button>
@@ -606,13 +608,8 @@ async function verificarOtp(){
     const d = await r.json();
     if(!r.ok){throw new Error(d.detail || 'Código incorrecto');}
     document.getElementById('btn-descargar').onclick = ()=>window.location.href = d.download_url;
-    calendarEnabled = !!d.calendar_enabled;
     show('step-5');
-    if(calendarEnabled){
-      cargarSlots();
-    }else{
-      document.getElementById('slots-cont').innerHTML = '<div class="alert alert-info">El abogado te contactará por WhatsApp para coordinar.</div>';
-    }
+    cargarSlots();
   }catch(e){err('err-4', e.message);}
   spin('spinner-4', false);
 }
@@ -631,10 +628,14 @@ async function reenviarOtp(){
 
 async function cargarSlots(){
   try{
-    const r = await fetch('/api/lead/slots?token='+currentToken+'&days=5');
+    const r = await fetch('/api/lead/slots?token='+currentToken+'&days=7');
     const d = await r.json();
+    if(d.lawyer){
+      document.getElementById('lawyer-info').innerHTML =
+        `<div class="alert alert-gold"><b>👨‍⚖️ Abogado asignado:</b> ${d.lawyer.name}<br><span class="muted">Te llamará por WhatsApp a la hora que elijas.</span></div>`;
+    }
     if(!d.slots || !d.slots.length){
-      document.getElementById('slots-cont').innerHTML = '<div class="alert alert-info">No hay horarios disponibles esta semana. El abogado te contactará por WhatsApp.</div>';
+      document.getElementById('slots-cont').innerHTML = '<div class="alert alert-info">No hay horarios disponibles los próximos días. El abogado te contactará por WhatsApp para coordinar.</div>';
       return;
     }
     const html = d.slots.map(s=>`
@@ -674,8 +675,8 @@ async function confirmarCita(){
     const fmt = dt.toLocaleString('es-CO',{weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
     document.getElementById('cita-info').innerHTML = `
       <div style="margin-bottom:12px"><b>📅 ${fmt} (Bogotá)</b></div>
-      ${d.meet_url ? `<div style="margin-bottom:12px"><a href="${d.meet_url}" target="_blank" style="color:var(--azul);font-weight:700">🎥 Únete a Meet aquí</a></div>` : ''}
-      <div class="muted">Te enviamos confirmación por WhatsApp y correo.</div>`;
+      <div style="margin-bottom:12px">👨‍⚖️ Abogado: <b>${d.lawyer_name||''}</b></div>
+      <div class="muted">Te enviamos confirmación por WhatsApp.</div>`;
     show('step-6');
   }catch(e){
     document.getElementById('agenda-result').innerHTML = '<div class="alert alert-err">'+e.message+'</div>';
@@ -834,6 +835,31 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
   .meeting-card h4{color:#002347;font-size:14px;margin-bottom:6px;}
   .meeting-card .meta{font-size:12px;color:#555;margin-bottom:6px;}
   .meeting-card a.meet{color:#16a34a;font-weight:700;font-size:13px;text-decoration:none;}
+
+  /* Calendar semanal */
+  .cal-nav{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;}
+  .cal-nav .range{font-weight:700;color:#002347;}
+  .cal-grid{display:grid;grid-template-columns:60px repeat(7,1fr);border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;font-size:11px;min-width:760px;}
+  .cal-cell{border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:4px;min-height:32px;}
+  .cal-cell:nth-child(8n){border-right:none;}
+  .cal-header{background:#002347;color:#fff;padding:8px;text-align:center;font-weight:700;font-size:12px;}
+  .cal-header.today{background:#C5A059;}
+  .cal-hour{background:#f4f6f9;color:#666;text-align:center;padding:6px 4px;font-weight:700;}
+  .cal-slot{cursor:pointer;position:relative;}
+  .cal-slot.free{background:#fff;}
+  .cal-slot.free:hover{background:#dcfce7;}
+  .cal-slot.booked{background:#dbeafe;cursor:pointer;}
+  .cal-slot.booked:hover{background:#bfdbfe;}
+  .cal-slot.blocked{background:#fee2e2;cursor:pointer;}
+  .cal-slot.past,.cal-slot.off_hours{background:#f4f6f9;color:#ccc;}
+  .cal-slot.past{cursor:not-allowed;}
+  .cal-slot .mini{font-size:9px;font-weight:700;display:block;}
+  .cal-slot.booked .mini{color:#1e40af;}
+  .cal-slot.blocked .mini{color:#991b1b;}
+  .cal-scroll{overflow-x:auto;}
+  .legend{display:flex;gap:14px;margin-top:10px;font-size:11px;}
+  .legend .lg{display:inline-flex;align-items:center;gap:4px;}
+  .legend .sw{width:12px;height:12px;border-radius:2px;display:inline-block;}
 </style></head><body>
 
 <header>
@@ -862,7 +888,20 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
 
   <!-- AGENDA -->
   <div class="panel on" id="p-agenda">
-    <h3 style="margin-bottom:14px;color:#002347">Próximas citas (Google Meet)</h3>
+    <div class="cal-nav">
+      <button class="btn btn-sm outline" onclick="semanaPrev()">◀ Semana anterior</button>
+      <div class="range" id="cal-range">—</div>
+      <button class="btn btn-sm outline" onclick="semanaNext()">Semana siguiente ▶</button>
+    </div>
+    <div class="cal-scroll"><div id="cal-grid"></div></div>
+    <div class="legend">
+      <span class="lg"><span class="sw" style="background:#fff;border:1px solid #e2e8f0"></span> Libre</span>
+      <span class="lg"><span class="sw" style="background:#dbeafe"></span> Cita agendada</span>
+      <span class="lg"><span class="sw" style="background:#fee2e2"></span> Bloqueado</span>
+      <span class="lg"><span class="sw" style="background:#f4f6f9"></span> Fuera de horario / pasado</span>
+    </div>
+
+    <h3 style="margin:24px 0 14px;color:#002347">Próximas citas</h3>
     <div id="appts-cont">Cargando…</div>
   </div>
 
@@ -930,7 +969,7 @@ function tab(name){
   document.querySelector(`[onclick="tab('${name}')"]`).classList.add('on');
   document.getElementById('p-'+name).classList.add('on');
   if(name==='leads')loadLeads();
-  if(name==='agenda')loadAppts();
+  if(name==='agenda'){loadCal(); loadAppts();}
   if(name==='config')loadMe();
 }
 
@@ -1036,12 +1075,94 @@ async function loadAppts(){
     const fmt = d.toLocaleString('es-CO',{weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
     return `<div class="meeting-card">
       <h4>📅 ${fmt} · ${a.lead_name||'Cliente'}</h4>
-      <div class="meta">📞 +${a.lead_phone} · ${a.lead_email||''}</div>
-      <div class="meta"><b>Caso:</b> ${(a.lead_descripcion||'').slice(0,200)}…</div>
-      ${a.meet_url?`<a href="${a.meet_url}" target="_blank" class="meet">🎥 Únete a Meet</a>`:''}
-      ${a.html_link?` · <a href="${a.html_link}" target="_blank" style="color:#002347;font-size:12px">Ver en calendario</a>`:''}
+      <div class="meta">📱 <a href="https://wa.me/${a.lead_phone}" target="_blank">+${a.lead_phone}</a> · ${a.lead_email||''}</div>
+      <div class="meta"><b>Área:</b> ${a.lead_area||'—'} · <b>Caso:</b> ${(a.lead_descripcion||'').slice(0,200)}…</div>
+      <div class="meta">
+        ${a.meet_url?`🎥 <a href="${a.meet_url}" target="_blank" class="meet">Abrir Meet manual</a> · `:''}
+        <a href="#" onclick="editMeet(${a.id});return false" style="color:#002347;font-size:12px">${a.meet_url?'Editar':'Agregar'} link Meet</a> ·
+        <a href="#" onclick="marcarCita(${a.id},'completed');return false" style="color:#16a34a;font-size:12px">Marcar completada</a> ·
+        <a href="#" onclick="marcarCita(${a.id},'cancelled_by_lawyer');return false" style="color:#c8102e;font-size:12px">Cancelar</a>
+      </div>
     </div>`;
   }).join('');
+}
+
+async function editMeet(aid){
+  const url = prompt('Pegá el link de Meet/Zoom/Teams (opcional):')||'';
+  await api('/api/pro/appointments/'+aid,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({meet_url:url.trim()})});
+  loadAppts();
+}
+async function marcarCita(aid, estado){
+  const notes = estado==='cancelled_by_lawyer' ? (prompt('Razón de cancelación (se envía al cliente):')||'') : '';
+  if(estado==='cancelled_by_lawyer' && !confirm('¿Cancelar esta cita y notificar al cliente?'))return;
+  await api('/api/pro/appointments/'+aid,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:estado,notes})});
+  loadAppts(); loadCal();
+}
+
+// ── Calendar semanal ───────────────────────────────────────────────────
+let calCurStart = null;
+async function loadCal(startDate){
+  const url = '/api/pro/agenda'+(startDate?'?start='+startDate:'');
+  const d = await api(url);
+  calCurStart = d.week_start;
+  document.getElementById('cal-range').textContent = `Semana ${d.week_start} a ${d.week_end}`;
+  const hoy = new Date().toISOString().slice(0,10);
+  // Header
+  let html = '<div class="cal-grid" style="min-width:760px">';
+  html += '<div class="cal-header">Hora</div>';
+  d.dias.forEach(dia=>{
+    html += `<div class="cal-header${dia.date===hoy?' today':''}">${dia.label}</div>`;
+  });
+  // Transpose: por cada slot horario, una fila con los 7 días
+  const horas = d.dias[0].slots.map(s=>s.hour);
+  horas.forEach((h, hi)=>{
+    html += `<div class="cal-cell cal-hour">${h}</div>`;
+    d.dias.forEach(dia=>{
+      const sl = dia.slots[hi];
+      let content = '';
+      if(sl.state==='booked' && sl.item){
+        content = `<span class="mini">${(sl.item.title||'').slice(0,10)}</span>`;
+      }else if(sl.state==='blocked' && sl.item){
+        content = `<span class="mini">⛔ ${(sl.item.reason||'Bloqueado').slice(0,10)}</span>`;
+      }
+      html += `<div class="cal-cell cal-slot ${sl.state}" onclick="calClick('${sl.state}','${sl.start}',${sl.item?sl.item.id:'null'},${sl.item?"'"+(sl.item.type||'')+"'":'null'})">${content}</div>`;
+    });
+  });
+  html += '</div>';
+  document.getElementById('cal-grid').innerHTML = html;
+}
+async function calClick(state, startIso, itemId, itemType){
+  if(state==='past' || state==='off_hours')return;
+  if(state==='free'){
+    if(!confirm('¿Bloquear este horario? (30 min)\\nEj: porque estás en otra reunión, almuerzo, etc.'))return;
+    const reason = prompt('Motivo (opcional):')||'';
+    const endIso = new Date(new Date(startIso).getTime()+30*60000).toISOString();
+    try{
+      await api('/api/pro/blocks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_iso:startIso,end_iso:endIso,reason})});
+      loadCal(calCurStart);
+    }catch(e){alert(e.message);}
+    return;
+  }
+  if(state==='blocked'){
+    if(!confirm('¿Desbloquear este horario?'))return;
+    await api('/api/pro/blocks/'+itemId,{method:'DELETE'});
+    loadCal(calCurStart); return;
+  }
+  if(state==='booked'){
+    // Ver detalle del lead asociado a esta cita
+    const appts = await api('/api/pro/appointments?upcoming=true');
+    const a = appts.find(x=>x.id===itemId);
+    if(!a)return;
+    alert(`Cita: ${a.lead_name}\\nTel: +${a.lead_phone}\\nÁrea: ${a.lead_area}\\n\\nCaso: ${(a.lead_descripcion||'').slice(0,300)}`);
+  }
+}
+function semanaPrev(){
+  const d=new Date(calCurStart); d.setDate(d.getDate()-7);
+  loadCal(d.toISOString().slice(0,10));
+}
+function semanaNext(){
+  const d=new Date(calCurStart); d.setDate(d.getDate()+7);
+  loadCal(d.toISOString().slice(0,10));
 }
 
 // ── RAG tools ────────────────────────────────────────────────────────────
@@ -1113,7 +1234,7 @@ async function cambiarPwd(){
   document.getElementById('new-pwd').value='';
 }
 
-loadMe(); loadStats(); loadAppts();
+loadMe(); loadStats(); loadCal(); loadAppts();
 setInterval(loadStats, 60000);
 </script>
 </body></html>""".replace("NAME_PLACEHOLDER", name)

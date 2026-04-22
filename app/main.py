@@ -50,7 +50,7 @@ from app import db as db_mod
 from app import whatsapp as wa
 from app import tutela_lite as tl
 from app import ui as ui_mod
-from app import calendar_svc as cal
+from app import agenda as ag
 from app import auth as auth_mod
 
 # ── App ────────────────────────────────────────────────────────────────────────
@@ -287,7 +287,7 @@ async def lead_verify(req: LeadOtpReq, request: Request):
     return {
         "ok": True,
         "download_url": f"/api/lead/download/{req.token}.docx",
-        "calendar_enabled": cal.is_enabled(),
+        "calendar_enabled": True,   # agenda nativa siempre activa
     }
 
 
@@ -309,26 +309,24 @@ async def lead_download(token: str, request: Request):
     )
 
 
-# ── Booking de citas (público; requiere lead verificado) ──────────────────────
-
-class SlotsQuery(BaseModel):
-    token: str
-    days: int = Field(5, ge=1, le=10)
-
+# ── Booking con agenda NATIVA (público; requiere lead verificado) ─────────────
 
 @app.get("/api/lead/slots")
-async def lead_slots(token: str, days: int = 5, request: Request = None):
+async def lead_slots(token: str, days: int = 7):
     lead = db_mod.get_lead_by_token(token)
     if not lead or lead["status"] not in ("verified","contacted","closed"):
         raise HTTPException(403, "Verifica tu OTP primero.")
-    if not cal.is_enabled():
-        return {"ok": False, "calendar_enabled": False, "slots": []}
-    lawyer_email = None
+    # Asegurar asignación de abogado
+    lawyer = None
     if lead.get("lawyer_id"):
-        lw = db_mod.get_lawyer(lead["lawyer_id"])
-        lawyer_email = lw and lw.get("email")
-    return {"ok": True, "calendar_enabled": True,
-            "slots": cal.slots_disponibles(dias_adelante=days, lawyer_email=lawyer_email)}
+        lawyer = db_mod.get_lawyer(lead["lawyer_id"])
+    if not lawyer:
+        lawyer = db_mod.lawyer_for_assignment(lead.get("area")) or db_mod.lawyer_for_area(lead.get("area"))
+    if not lawyer:
+        return {"ok": False, "reason": "no_lawyer_available", "slots": []}
+    slots = ag.slots_disponibles(lawyer_id=lawyer["id"], dias_adelante=days)
+    return {"ok": True, "slots": slots,
+            "lawyer": {"name": lawyer["name"], "whatsapp": lawyer["whatsapp"]}}
 
 
 class BookReq(BaseModel):
@@ -337,54 +335,93 @@ class BookReq(BaseModel):
     duration_min: int = 30
 
 
+def _fecha_es(dt: datetime) -> str:
+    """Formato legible en español."""
+    DIAS = ["lunes","martes","miércoles","jueves","viernes","sábado","domingo"]
+    MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"]
+    return f"{DIAS[dt.weekday()]} {dt.day} de {MESES[dt.month-1]} · {dt.strftime('%H:%M')}"
+
+
 @app.post("/api/lead/book")
 async def lead_book(req: BookReq, request: Request):
     lead = db_mod.get_lead_by_token(req.token)
     if not lead or lead["status"] not in ("verified","contacted","closed"):
         raise HTTPException(403, "Verifica tu OTP primero.")
-    if not cal.is_enabled():
-        raise HTTPException(503, "Agendamiento no disponible. Te contactaremos por WhatsApp.")
 
     existing = db_mod.get_appointment_by_lead(lead["id"])
     if existing:
         raise HTTPException(400, "Ya tienes una cita agendada. Cancélala o reprográmala.")
 
-    lawyer = db_mod.get_lawyer(lead["lawyer_id"]) if lead.get("lawyer_id") else db_mod.lawyer_for_assignment(lead.get("area"))
+    lawyer = None
+    if lead.get("lawyer_id"):
+        lawyer = db_mod.get_lawyer(lead["lawyer_id"])
+    if not lawyer:
+        lawyer = db_mod.lawyer_for_assignment(lead.get("area")) or db_mod.lawyer_for_area(lead.get("area"))
     if not lawyer:
         raise HTTPException(503, "No hay abogados disponibles. Te contactaremos pronto.")
 
-    res = cal.crear_cita(req.start_iso, req.duration_min, lead, lawyer,
-                         descripcion_caso=lead.get("descripcion",""))
-    if not res.get("ok"):
-        raise HTTPException(503, f"Error agendando: {res.get('error')}")
+    # Validar que el slot siga libre
+    start_dt = ag._parse_dt(req.start_iso)
+    libres = ag.slots_disponibles(lawyer_id=lawyer["id"], dias_adelante=10, max_slots=200)
+    if not any(abs((ag._parse_dt(s["start"]) - start_dt).total_seconds()) < 60 for s in libres):
+        raise HTTPException(409, "Ese horario acaba de ocuparse o quedó fuera de disponibilidad. Refresca y elige otro.")
+
+    # Si aún no estaba asignado, asignamos ahora
+    if not lead.get("lawyer_id"):
+        with db_mod.db() as c:
+            c.execute("UPDATE leads SET lawyer_id=? WHERE id=?", (lawyer["id"], lead["id"]))
 
     aid = db_mod.create_appointment(
         lead_id=lead["id"], lawyer_id=lawyer["id"],
-        scheduled_at=res["start"], duration_min=req.duration_min,
-        calendar_event_id=res["event_id"], meet_url=res.get("meet_url",""),
-        html_link=res.get("html_link",""),
+        scheduled_at=start_dt.isoformat(), duration_min=req.duration_min,
+        modality="whatsapp",
     )
     db_mod.track_event("meeting_booked", ip=_ip_of(request),
-                       payload={"start": res["start"], "lawyer": lawyer["name"]})
+                       payload={"start": start_dt.isoformat(), "lawyer": lawyer["name"]})
 
-    # Confirmación al cliente por WhatsApp
+    fecha_legible = _fecha_es(start_dt)
+    base = str(request.base_url).rstrip("/")
+    dashboard_url = f"{base}/pro"
+
+    # WhatsApp al cliente
     try:
-        s = datetime.fromisoformat(res["start"])
-        body = (
-            "✅ *Cita confirmada · Galeano Herrera*\n\n"
-            f"📅 {s.strftime('%A %d de %B %Y · %H:%M')} (hora Bogotá)\n"
+        body_cli = (
+            "✅ *Cita confirmada · Galeano Herrera*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"📅 *{fecha_legible}* (Bogotá)\n"
             f"⏱  Duración: {req.duration_min} min\n"
-            f"👨‍⚖️ Abogado: {lawyer['name']}\n\n"
-            f"🎥 Únete por Meet: {res.get('meet_url','(enlace en el correo)')}\n\n"
-            "Te llegará invitación al correo y recordatorios 24h y 1h antes.\n"
-            "Si necesitas cancelar, hazlo al menos 60 minutos antes."
+            f"👨‍⚖️ Abogado: {lawyer['name']}\n"
+            "📱 Modalidad: llamada por WhatsApp\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Tu abogado te llamará a este mismo número a la hora acordada.\n\n"
+            "🔔 Te enviaremos recordatorio *24 h* y *1 h* antes.\n"
+            "⚠ Si no puedes asistir, cancela al menos 60 min antes."
         )
-        wa.send_text(lead["phone"], body)
+        wa.send_text(lead["phone"], body_cli)
     except Exception as e:
-        print(f"[book] confirm wa error: {e}")
+        print(f"[book] wa cliente: {e}")
 
-    return {"ok": True, "appointment_id": aid, "meet_url": res.get("meet_url"),
-            "html_link": res.get("html_link"), "start": res["start"]}
+    # WhatsApp al abogado
+    try:
+        body_lw = (
+            "🆕 *Nueva cita agendada*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 {lead.get('name','Cliente')}\n"
+            f"📱 +{lead.get('phone','')}\n"
+            f"⚖️  Área: {lead.get('area') or '—'}\n"
+            f"📅 *{fecha_legible}*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"Caso: {(lead.get('descripcion','') or '')[:280]}…\n\n"
+            f"📲 WhatsApp cliente: https://wa.me/{lead.get('phone','')}\n"
+            f"📊 Dashboard: {dashboard_url}"
+        )
+        wa.send_text(lawyer["whatsapp"], body_lw)
+    except Exception as e:
+        print(f"[book] wa abogado: {e}")
+
+    return {"ok": True, "appointment_id": aid,
+            "start": start_dt.isoformat(),
+            "lawyer_name": lawyer["name"]}
 
 
 @app.get("/api/lead/appointment")
@@ -393,7 +430,7 @@ async def lead_appointment(token: str):
     if not lead: raise HTTPException(404, "no encontrado")
     appt = db_mod.get_appointment_by_lead(lead["id"])
     if not appt: return {"ok": False, "appointment": None}
-    return {"ok": True, "appointment": appt, "puede_cancelar": cal.puede_cancelar(appt["scheduled_at"], 60)}
+    return {"ok": True, "appointment": appt, "puede_cancelar": ag.puede_cancelar(appt["scheduled_at"], 60)}
 
 
 class CancelReq(BaseModel):
@@ -405,12 +442,21 @@ async def lead_cancel_appt(req: CancelReq, request: Request):
     if not lead: raise HTTPException(404, "no encontrado")
     appt = db_mod.get_appointment_by_lead(lead["id"])
     if not appt: raise HTTPException(404, "sin cita")
-    if not cal.puede_cancelar(appt["scheduled_at"], 60):
+    if not ag.puede_cancelar(appt["scheduled_at"], 60):
         raise HTTPException(400, "Quedan menos de 60 minutos para tu cita: ya no se puede cancelar. Si no puedes asistir, escríbenos por WhatsApp para reprogramar.")
-    if appt.get("calendar_event_id"):
-        cal.cancelar_cita(appt["calendar_event_id"])
     db_mod.update_appointment_status(appt["id"], "cancelled_by_user")
     db_mod.track_event("meeting_cancelled", ip=_ip_of(request))
+    # Notificar al abogado
+    lw = db_mod.get_lawyer(appt.get("lawyer_id")) if appt.get("lawyer_id") else None
+    if lw:
+        try:
+            s = ag._parse_dt(appt["scheduled_at"])
+            wa.send_text(lw["whatsapp"],
+                "❌ *Cita cancelada por el cliente*\n"
+                f"📅 {_fecha_es(s)}\n"
+                f"👤 {lead.get('name','')} (+{lead.get('phone','')})")
+        except Exception as e:
+            print(f"[cancel] wa abogado: {e}")
     return {"ok": True}
 
 
@@ -425,15 +471,25 @@ async def lead_resched(req: RescheduleReq, request: Request):
     if not lead: raise HTTPException(404, "no encontrado")
     appt = db_mod.get_appointment_by_lead(lead["id"])
     if not appt: raise HTTPException(404, "sin cita")
-    if not cal.puede_cancelar(appt["scheduled_at"], 60):
+    if not ag.puede_cancelar(appt["scheduled_at"], 60):
         raise HTTPException(400, "No puedes reprogramar a menos de 60 min de la cita.")
-    res = cal.reprogramar_cita(appt["calendar_event_id"], req.start_iso, req.duration_min)
-    if not res.get("ok"):
-        raise HTTPException(503, f"Error: {res.get('error')}")
-    db_mod.update_appointment_event(appt["id"], appt["calendar_event_id"],
-                                    appt.get("meet_url",""), res.get("html_link",""),
-                                    scheduled_at=req.start_iso)
-    return {"ok": True, "start": req.start_iso}
+    # Validar nuevo slot
+    new_dt = ag._parse_dt(req.start_iso)
+    libres = ag.slots_disponibles(lawyer_id=appt.get("lawyer_id"), dias_adelante=10, max_slots=200)
+    if not any(abs((ag._parse_dt(s["start"]) - new_dt).total_seconds()) < 60 for s in libres):
+        raise HTTPException(409, "Ese horario no está disponible.")
+    db_mod.update_appointment_time(appt["id"], new_dt.isoformat())
+    # Notificar a ambos
+    lw = db_mod.get_lawyer(appt.get("lawyer_id")) if appt.get("lawyer_id") else None
+    for phone, titulo in [(lead.get("phone"), "Cliente"), (lw and lw.get("whatsapp"), "Abogado")]:
+        if not phone: continue
+        try:
+            wa.send_text(phone,
+                f"🔄 *Cita reprogramada · Galeano Herrera*\n"
+                f"Nueva fecha: *{_fecha_es(new_dt)}* (Bogotá).")
+        except Exception as e:
+            print(f"[resched] wa: {e}")
+    return {"ok": True, "start": new_dt.isoformat()}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -538,7 +594,7 @@ async def admin_config():
         "gemini_api_key": bool(obtener_api_key()),
         "faiss_listo": motor._listo, "fichas": len(motor.meta),
         "ultramsg": bool(wa.ULTRAMSG_INSTANCE and wa.ULTRAMSG_TOKEN),
-        "calendar": cal.is_enabled(),
+        "agenda_nativa": True,
         "lawyer_default": (lawyer["name"] + " (+" + lawyer["whatsapp"] + ")") if lawyer else None,
         "dev_mode": wa.DEV_MODE,
     }
@@ -602,6 +658,71 @@ async def pro_patch_me(body: PatchMe, lawyer: dict = Depends(auth_mod.require_la
         db_mod.set_lawyer_availability(lawyer["id"], body.available)
     if body.password:
         db_mod.set_lawyer_password(lawyer["id"], body.password)
+    return {"ok": True}
+
+
+# ── Agenda del abogado (calendar nativo) ─────────────────────────────────────
+
+@app.get("/api/pro/agenda")
+async def pro_agenda(start: Optional[str] = None,
+                     lawyer: dict = Depends(auth_mod.require_lawyer)):
+    """Grid semanal del abogado con slots libres/ocupados/bloqueados."""
+    return ag.semana_del_abogado(lawyer["id"], start_date=start)
+
+
+class BlockCreate(BaseModel):
+    start_iso: str
+    end_iso: str
+    reason: Optional[str] = ""
+
+@app.post("/api/pro/blocks")
+async def pro_block_create(body: BlockCreate, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    # Validar que no solape con citas programadas
+    with db_mod.db() as c:
+        conflicts = c.execute(
+            """SELECT id FROM appointments WHERE lawyer_id=? AND status='scheduled'
+               AND scheduled_at < ? AND datetime(scheduled_at, '+'||duration_min||' minutes') > ?""",
+            (lawyer["id"], body.end_iso, body.start_iso),
+        ).fetchall()
+    if conflicts:
+        raise HTTPException(409, f"Ya hay {len(conflicts)} cita(s) agendada(s) en ese rango. Cancélalas primero.")
+    bid = db_mod.create_block(lawyer["id"], body.start_iso, body.end_iso, body.reason or "")
+    return {"ok": True, "id": bid}
+
+
+@app.delete("/api/pro/blocks/{bid}")
+async def pro_block_delete(bid: int, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    db_mod.delete_block(bid, lawyer_id=lawyer["id"])
+    return {"ok": True}
+
+
+class AppointmentUpdate(BaseModel):
+    meet_url: Optional[str] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+@app.patch("/api/pro/appointments/{aid}")
+async def pro_appt_update(aid: int, body: AppointmentUpdate,
+                          lawyer: dict = Depends(auth_mod.require_lawyer)):
+    appt = db_mod.get_appointment(aid)
+    if not appt or appt.get("lawyer_id") != lawyer["id"]:
+        raise HTTPException(404, "cita no encontrada")
+    if body.meet_url is not None:
+        db_mod.update_appointment_meet(aid, body.meet_url.strip())
+    if body.status:
+        if body.status not in ("scheduled","cancelled_by_lawyer","completed","no_show"):
+            raise HTTPException(400, "status inválido")
+        db_mod.update_appointment_status(aid, body.status, notes=body.notes or "")
+        # Notificar al cliente en cancelación/no_show
+        if body.status == "cancelled_by_lawyer":
+            with db_mod.db() as c:
+                r = c.execute("SELECT phone, name FROM leads WHERE id=?", (appt["lead_id"],)).fetchone()
+            if r:
+                try:
+                    wa.send_text(r["phone"],
+                        "❌ *Tu cita fue cancelada por el abogado*\n"
+                        "Contáctanos por WhatsApp para reprogramar.")
+                except Exception: pass
     return {"ok": True}
 
 
@@ -733,18 +854,38 @@ async def cron_reminders(t: str = ""):
     for w in ("24h", "1h"):
         for appt in db_mod.appointments_pending_reminder(w):
             try:
-                s = datetime.fromisoformat(appt["scheduled_at"])
-                cuerpo = (
-                    "🔔 *Recordatorio de cita · Galeano Herrera*\n\n"
-                    f"📅 {s.strftime('%A %d de %B %Y · %H:%M')} (Bogotá)\n"
-                    f"🎥 Únete por Meet: {appt.get('meet_url','(ver correo)')}\n\n"
-                    + ("Tu cita es en aproximadamente *24 horas*.\n"
-                       "Si no puedes asistir, cancela ahora desde el sitio."
-                       if w == "24h" else
-                       "Tu cita empieza en aproximadamente *1 hora*.\n"
-                       "Ya no es posible cancelar (ventana de 60 min).")
+                s = ag._parse_dt(appt["scheduled_at"])
+                fecha = _fecha_es(s)
+                # Mensaje al cliente
+                msg_cli = (
+                    "🔔 *Recordatorio · Galeano Herrera*\n\n"
+                    f"📅 *{fecha}* (Bogotá)\n"
+                ) + (
+                    "Tu cita es en aproximadamente *24 horas*.\n\n"
+                    "El abogado te llamará por WhatsApp a este número.\n"
+                    "Si no puedes asistir, cancela desde el sitio o avísanos aquí."
+                    if w == "24h" else
+                    "Tu cita empieza en aproximadamente *1 hora*.\n\n"
+                    "Ten a la mano los documentos de tu caso (cédula, historia clínica, "
+                    "comunicaciones con la entidad accionada).\n"
+                    "Ya no es posible cancelar desde la app."
                 )
-                wa.send_text(appt["lead_phone"], cuerpo)
+                wa.send_text(appt["lead_phone"], msg_cli)
+
+                # A 1h antes, también avisamos al abogado
+                if w == "1h" and appt.get("lawyer_id"):
+                    lw = db_mod.get_lawyer(appt["lawyer_id"])
+                    if lw:
+                        msg_lw = (
+                            "⏰ *Cita en 1 hora*\n"
+                            f"📅 {fecha}\n"
+                            f"👤 {appt.get('lead_name','Cliente')}\n"
+                            f"📱 https://wa.me/{appt.get('lead_phone','')}\n\n"
+                            f"Abre tu dashboard para ver el caso completo:\n"
+                            f"https://gh-jurisprudencia-csj.onrender.com/pro"
+                        )
+                        wa.send_text(lw["whatsapp"], msg_lw)
+
                 db_mod.mark_appointment_reminded(appt["id"], w)
                 sent[w] += 1
             except Exception as e:
@@ -765,7 +906,7 @@ async def salud():
         "fichas": len(motor.meta),
         "api_key": bool(obtener_api_key()),
         "ultramsg": bool(wa.ULTRAMSG_INSTANCE and wa.ULTRAMSG_TOKEN),
-        "calendar": cal.is_enabled(),
+        "agenda_nativa": True,
         "version": app.version,
     }
 
