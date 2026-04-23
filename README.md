@@ -126,4 +126,63 @@ Docs OpenAPI automáticas en `/docs`.
 
 ---
 
+---
+
+## Incrustar/compartir la landing en Facebook
+
+### Opción A · Compartir link (recomendada, 99% de casos)
+
+Cuando compartes `https://gh-jurisprudencia-csj.onrender.com/` en Facebook, WhatsApp o LinkedIn, se muestra automáticamente:
+- **Imagen** (1200×630) generada dinámicamente desde `/og.png` con la marca Galeano Herrera y headline
+- **Título:** "Te están negando un derecho. Recuperalo en 2 minutos."
+- **Descripción:** frase que engancha + fuentes verificables
+
+Implementado mediante Open Graph + Twitter Card. No requiere configuración adicional.
+
+**Refrescar el cache de Facebook** (si cambias la imagen o el copy):
+1. Entra a https://developers.facebook.com/tools/debug/
+2. Pega la URL `https://gh-jurisprudencia-csj.onrender.com/`
+3. Click **"Scrape Again"** — Facebook recarga la preview.
+
+### Opción B · Facebook Pixel (para campañas pagadas)
+
+Si vas a pautar en Facebook/Instagram Ads:
+1. En tu Business Manager, obtén tu `Pixel ID` (15-16 dígitos).
+2. En el dashboard de Render, añade la env var: `FB_PIXEL_ID=<tu_pixel>`.
+3. Render redeploya solo. El Pixel queda activo y dispara eventos:
+   - `PageView` (landing)
+   - `Lead` (cuando ve el preview)
+   - `CompleteRegistration` (tras el formulario)
+   - `Contact` (cuando verifica OTP)
+   - `SimulacionDescargada` (custom — descarga DOCX)
+   - `Schedule` (cuando agenda cita)
+
+Con esto puedes optimizar campañas por "conversiones" reales, no por clicks.
+
+### Opción C · Tab en Facebook Page (iframe)
+
+Facebook permite incrustar un sitio web como **Tab de una página** via Facebook App:
+1. Crea una app en https://developers.facebook.com/apps
+2. Añade el producto **"Page Tabs"**
+3. Como URL del tab, usa `https://gh-jurisprudencia-csj.onrender.com/`
+4. En Render, set `ALLOW_IFRAME_EMBED=1` para que permita ser embebido (el sistema automáticamente relaja `X-Frame-Options` y añade CSP `frame-ancestors` con facebook.com)
+5. Instala el tab en tu página.
+
+⚠ **Opción C** es compleja y rara vez vale la pena. La **Opción A** convierte mejor porque el usuario llega a un sitio completo, no a una miniatura limitada.
+
+### Verificar que el OG funciona
+
+```bash
+# Debug Facebook
+https://developers.facebook.com/tools/debug/?q=https%3A%2F%2Fgh-jurisprudencia-csj.onrender.com%2F
+
+# Debug Twitter
+https://cards-dev.twitter.com/validator
+
+# LinkedIn Post Inspector
+https://www.linkedin.com/post-inspector/
+```
+
+---
+
 *Galeano Herrera | Abogados — 2025*

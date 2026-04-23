@@ -8,15 +8,70 @@ from __future__ import annotations
 # =============================================================================
 
 def landing_html() -> str:
-    return """<!DOCTYPE html>
+    import os as _os
+    FB_PIXEL_ID = (_os.environ.get("FB_PIXEL_ID") or "").strip()
+    SITE_URL = (_os.environ.get("PUBLIC_URL") or "https://gh-jurisprudencia-csj.onrender.com").rstrip("/")
+    fb_pixel_snippet = ""
+    fb_pixel_noscript = ""
+    if FB_PIXEL_ID:
+        fb_pixel_snippet = (
+            "<script>\n"
+            "!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?"
+            "n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;"
+            "n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;"
+            "t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}"
+            "(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');\n"
+            f"fbq('init','{FB_PIXEL_ID}');fbq('track','PageView');\n"
+            "</script>"
+        )
+        fb_pixel_noscript = (
+            f'<noscript><img height="1" width="1" style="display:none" '
+            f'src="https://www.facebook.com/tr?id={FB_PIXEL_ID}&ev=PageView&noscript=1"/></noscript>'
+        )
+
+    OG_TITLE = "Te están negando un derecho. Recuperalo en 2 minutos."
+    OG_DESC  = ("Genera tu acción de tutela respaldada en sentencias reales de la Corte Suprema de Justicia. "
+                "Habla gratis con un abogado por WhatsApp. Sin papeleos.")
+    head_html = f'''<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Galeano Herrera | Abogados — Simulación de tutela basada en jurisprudencia real de la Corte Suprema. Te conectamos con un abogado en menos de 2 horas.">
-<meta property="og:title" content="Tu tutela respaldada en jurisprudencia real">
-<meta property="og:description" content="Genera una simulación de tu acción de tutela con jurisprudencia real de la CSJ y agenda cita gratuita con un abogado.">
-<title>Galeano Herrera · Tu tutela respaldada en jurisprudencia real</title>
+<meta name="robots" content="index,follow">
+<meta name="description" content="Galeano Herrera | Abogados — Simulación de tu acción de tutela respaldada en jurisprudencia real de la Corte Suprema. Te conecta con un abogado por WhatsApp.">
+<link rel="canonical" href="{SITE_URL}/">
+
+<!-- Open Graph (Facebook, WhatsApp, LinkedIn) -->
+<meta property="og:type"        content="website">
+<meta property="og:site_name"   content="Galeano Herrera | Abogados">
+<meta property="og:locale"      content="es_CO">
+<meta property="og:url"         content="{SITE_URL}/">
+<meta property="og:title"       content="{OG_TITLE}">
+<meta property="og:description" content="{OG_DESC}">
+<meta property="og:image"       content="{SITE_URL}/og.png">
+<meta property="og:image:width"  content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt"   content="Galeano Herrera | Abogados — Tu tutela en 2 minutos">
+
+<!-- Twitter -->
+<meta name="twitter:card"        content="summary_large_image">
+<meta name="twitter:title"       content="{OG_TITLE}">
+<meta name="twitter:description" content="{OG_DESC}">
+<meta name="twitter:image"       content="{SITE_URL}/og.png">
+
+<!-- Favicon SVG inline (escudo con G) -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='10' fill='%23002347'/><text x='50%25' y='54%25' font-family='Georgia,serif' font-size='42' font-weight='900' text-anchor='middle' fill='%23C5A059'>G</text></svg>">
+<link rel="apple-touch-icon" href="{SITE_URL}/og.png">
+
+{fb_pixel_snippet}
+
+<title>Galeano Herrera · Tu tutela en 2 minutos, respaldada en la Corte Suprema</title>'''
+    return head_html + _landing_body(FB_PIXEL_ID, fb_pixel_noscript)
+
+
+def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
+    return """</head>
+""" + fb_pixel_noscript + """
 <style>
   /* — Paleta basada en psicología del consumidor legal —
      Azul profundo: confianza, autoridad, profesionalismo
@@ -31,10 +86,16 @@ def landing_html() -> str:
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'Segoe UI',-apple-system,'Inter',sans-serif;background:#fff;color:var(--texto);line-height:1.55;}
 
-  /* TOPBAR */
-  .topbar{background:var(--azul);color:#fff;padding:8px 16px;font-size:12px;text-align:center;
-          border-bottom:1px solid rgba(255,255,255,.1);}
-  .topbar a{color:var(--oro-soft);text-decoration:underline;font-weight:600;}
+  /* ACTION BAR sticky */
+  .action-bar{position:sticky;top:0;z-index:40;background:linear-gradient(135deg,var(--azul) 0%,var(--azul-2) 100%);
+              color:#fff;padding:10px 16px;display:flex;justify-content:center;align-items:center;gap:14px;
+              border-bottom:2px solid var(--oro);box-shadow:0 2px 10px rgba(0,0,0,.18);flex-wrap:wrap;}
+  .action-msg{font-size:13px;font-weight:600;}
+  @media(max-width:560px){.action-msg{font-size:12px;}.action-aux{display:none;}}
+  .action-cta{background:var(--verde);color:#fff;padding:8px 20px;border-radius:6px;font-weight:700;font-size:13px;
+              text-decoration:none;transition:all .15s;white-space:nowrap;box-shadow:0 2px 8px rgba(22,163,74,.35);}
+  .action-cta:hover{background:#15803d;transform:translateY(-1px);box-shadow:0 4px 12px rgba(22,163,74,.45);}
+  .action-aux{color:var(--oro-soft);text-decoration:none;font-size:12px;font-weight:600;opacity:.9;}
 
   /* HEADER */
   header{padding:20px 16px;background:#fff;border-bottom:1px solid var(--gris-soft);
@@ -42,6 +103,36 @@ def landing_html() -> str:
   .logo{font-size:22px;font-weight:800;letter-spacing:-.5px;color:var(--azul);}
   .logo span{color:var(--oro);}
   .nav-links a{color:var(--azul);text-decoration:none;font-size:13px;margin-left:18px;font-weight:600;}
+
+  /* CARRUSEL CASOS */
+  .cases-section{padding:36px 0 24px;background:#fff;border-bottom:1px solid var(--gris-soft);}
+  .cases-section .head{max-width:1100px;margin:0 auto;padding:0 16px 16px;}
+  .cases-section .head h2{font-size:26px;color:var(--azul);font-weight:800;letter-spacing:-.3px;margin-bottom:6px;}
+  .cases-section .head p{font-size:14px;color:#6b7280;}
+  .cases-scroll{display:flex;gap:14px;overflow-x:auto;padding:10px 16px 24px;scroll-snap-type:x mandatory;scroll-behavior:smooth;
+                scrollbar-color:var(--oro) #f3f4f6;}
+  .cases-scroll::-webkit-scrollbar{height:8px;}
+  .cases-scroll::-webkit-scrollbar-track{background:#f3f4f6;border-radius:4px;}
+  .cases-scroll::-webkit-scrollbar-thumb{background:var(--oro);border-radius:4px;}
+  .case-card{flex:0 0 280px;scroll-snap-align:start;background:#fff;border:1px solid var(--gris-soft);border-radius:12px;
+             padding:18px;cursor:pointer;transition:all .15s;position:relative;}
+  .case-card:hover{border-color:var(--oro);transform:translateY(-3px);box-shadow:0 10px 24px rgba(0,0,0,.08);}
+  .case-card .ab{display:inline-block;padding:3px 10px;font-size:10px;font-weight:700;border-radius:10px;
+                 text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;color:#fff;}
+  .case-card .ab.salud{background:#16a34a;}
+  .case-card .ab.laboral{background:#7c3aed;}
+  .case-card .ab.pensiones{background:#0891b2;}
+  .case-card .ab.accidentes{background:#ea580c;}
+  .case-card .ab.insolvencia{background:#64748b;}
+  .case-card .ab.derechos_fundamentales{background:#C5A059;}
+  .case-card .tt{font-weight:700;color:var(--azul);font-size:15px;margin-bottom:6px;line-height:1.3;}
+  .case-card .ds{font-size:13px;color:#6b7280;line-height:1.5;}
+  .case-card .go{position:absolute;top:14px;right:14px;color:var(--verde);font-size:16px;opacity:0;transition:opacity .15s;}
+  .case-card:hover .go{opacity:1;}
+  .case-nav{max-width:1100px;margin:0 auto;padding:0 16px;display:flex;justify-content:flex-end;gap:6px;margin-top:-14px;margin-bottom:10px;}
+  .case-nav button{background:#fff;border:1px solid var(--gris-soft);border-radius:50%;width:34px;height:34px;cursor:pointer;
+                   color:var(--azul);font-size:14px;transition:all .15s;}
+  .case-nav button:hover{border-color:var(--oro);background:var(--gris);}
 
   /* HERO sobrio */
   .hero{background:var(--azul);color:#fff;padding:52px 16px 56px;text-align:center;border-bottom:3px solid var(--oro);}
@@ -216,9 +307,11 @@ def landing_html() -> str:
 </head>
 <body>
 
-<div class="topbar">
-  ⚖️ Plataforma legal con jurisprudencia real ·
-  <a href="/pro/login">Acceso abogados</a>
+<!-- Action bar sticky: visible siempre -->
+<div class="action-bar">
+  <div class="action-msg">⚡ Genera tu tutela en 2 minutos, respaldada en sentencias de la Corte Suprema</div>
+  <a class="action-cta" href="#step-1" onclick="scrollToWizard(event)">Empezar ahora →</a>
+  <a class="action-aux" href="/pro/login">Abogados</a>
 </div>
 
 <header>
@@ -266,6 +359,65 @@ def landing_html() -> str:
         <div class="desc">Tratamos tu información bajo la Ley 1581 de 2012. Tienes derecho a consultar, actualizar, rectificar o suprimir tus datos en cualquier momento.</div>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- CARRUSEL DE CASOS FRECUENTES (basado en jurisprudencia) -->
+<section class="cases-section">
+  <div class="head">
+    <h2>Casos más frecuentes</h2>
+    <p>Tipos de tutela que los jueces conceden con más regularidad en Colombia. Toca una para empezar tu caso — te lleva al paso 4 con un ejemplo ya escrito que puedes editar.</p>
+  </div>
+  <div class="case-nav">
+    <button onclick="scrollCases(-1)" aria-label="Anterior">◀</button>
+    <button onclick="scrollCases(1)" aria-label="Siguiente">▶</button>
+  </div>
+  <div class="cases-scroll" id="cases-scroll">
+    <!-- SALUD -->
+    <div class="case-card" data-area="salud" data-ej="Mi EPS Sanitas me niega desde hace 2 meses la quimioterapia que me prescribió el oncólogo. Soy paciente con cáncer de mama y no he podido iniciar tratamiento. Ya radiqué PQR y no responden."><span class="ab salud">Salud</span><div class="tt">EPS niega medicamento oncológico</div><div class="ds">Quimioterapia, radioterapia o fármacos no POS que la EPS rechaza por "no cobertura".</div><div class="go">→</div></div>
+    <div class="case-card" data-area="salud" data-ej="El ortopedista ordenó cirugía de rodilla hace 4 meses. La EPS dice que debo esperar autorización pero no avanza. Tengo dolor crónico y no puedo caminar bien."><span class="ab salud">Salud</span><div class="tt">Cirugía prescrita sin autorizar</div><div class="ds">Reemplazo de cadera, columna, cesárea programada y otras cirugías que se demoran meses.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="salud" data-ej="Necesito cita con el neurólogo urgente por convulsiones. La EPS solo me da cita para dentro de 6 meses. Mi condición empeora cada semana."><span class="ab salud">Salud</span><div class="tt">Cita con especialista demorada meses</div><div class="ds">Cardiología, oncología, neurología, oftalmología con agenda a 4+ meses.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="salud" data-ej="Soy paciente con lupus. La EPS me autoriza solo algunos tratamientos, pero no el tratamiento integral que indica el reumatólogo (terapias, medicamentos, controles). Llevo 8 meses sin el plan completo."><span class="ab salud">Salud</span><div class="tt">Tratamiento integral a enfermedad ruinosa</div><div class="ds">Cáncer, VIH, lupus, insuficiencia renal: EPS cubre parcial, debería ser integral.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="salud" data-ej="Mi madre quedó postrada tras un ACV. El médico tratante ordenó cuidador domiciliario 24 horas. La EPS lo niega diciendo que es responsabilidad familiar. Mi familia no puede contratar a alguien, necesitamos trabajar."><span class="ab salud">Salud</span><div class="tt">Cuidador domiciliario negado</div><div class="ds">Paciente postrado, adulto mayor: EPS alega que es responsabilidad familiar.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="salud" data-ej="Vivo en un municipio y mi tratamiento oncológico es en Bogotá. La EPS solo cubre el transporte una vez al mes, pero el protocolo exige semanal. No tengo recursos para pagar los demás viajes."><span class="ab salud">Salud</span><div class="tt">Transporte médico intermunicipal</div><div class="ds">Paciente rural con tratamiento especializado en otra ciudad.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="salud" data-ej="Soy cuidador de mi papá con Alzheimer en etapa avanzada. La EPS niega pañales, sonda y nutrición enteral aduciendo que no están en el POS. Sin estos insumos no puede sobrevivir."><span class="ab salud">Salud</span><div class="tt">Insumos médicos negados (pañales, sonda)</div><div class="ds">Pacientes crónicos que necesitan insumos "no POS" para vivir.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="salud" data-ej="Llegué a urgencias con dolor torácico intenso. La clínica me negó atención por 'tema administrativo' con la EPS. Tuvieron que estabilizarme varias horas después."><span class="ab salud">Salud</span><div class="tt">Atención de urgencias negada</div><div class="ds">Hospital/clínica que condiciona atención urgente por trámite con EPS.</div><div class="go">→</div></div>
+
+    <!-- PENSIONES -->
+    <div class="case-card" data-area="pensiones" data-ej="Radiqué mi solicitud de pensión de vejez en Colpensiones en enero. Hoy en abril no me han respondido. Tengo 63 años, 1500 semanas cotizadas y necesito la pensión para vivir."><span class="ab pensiones">Pensiones</span><div class="tt">Mora Colpensiones: 4+ meses sin respuesta</div><div class="ds">Solicitudes de vejez/invalidez sin resolver pese a tener documentos completos.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="pensiones" data-ej="Tuve un accidente laboral que me dejó con 65% de pérdida de capacidad laboral según dictamen de la Junta. Colpensiones me niega la pensión de invalidez diciendo que no cumplo el 50% de semanas."><span class="ab pensiones">Pensiones</span><div class="tt">Pensión de invalidez negada</div><div class="ds">Pese a dictamen de pérdida capacidad laboral ≥50%.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="pensiones" data-ej="Mi esposo falleció el 20 de febrero. Era pensionado de Colpensiones. Solicité la pensión de sobreviviente hace 2 meses y no hay respuesta. Dependía económicamente de él."><span class="ab pensiones">Pensiones</span><div class="tt">Pensión de sobreviviente / sustitución</div><div class="ds">Viuda/o, compañera permanente, hijos menores o con discapacidad.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="pensiones" data-ej="Cumplí 57 años y tengo 650 semanas cotizadas. Colpensiones me negó la indemnización sustitutiva argumentando que debo esperar la vejez. No tengo cómo mantenerme mientras tanto."><span class="ab pensiones">Pensiones</span><div class="tt">Indemnización sustitutiva negada</div><div class="ds">Cuando no se alcanzan las semanas para pensión pero sí aportes cotizados.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="pensiones" data-ej="Solicité traslado de Porvenir a Colpensiones hace 6 meses. Porvenir no remite mi expediente. Mientras tanto no se mueven mis trámites y no puedo pensionarme."><span class="ab pensiones">Pensiones</span><div class="tt">Traslado entre AFPs bloqueado</div><div class="ds">AFP privada retiene expediente al pasar a régimen público.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="pensiones" data-ej="Me pensioné en 2018 con mesada mínima. Llevo 3 años sin reajuste y la ley exige incremento según IPC. Colpensiones no ha actualizado mi mesada."><span class="ab pensiones">Pensiones</span><div class="tt">Reajuste de mesada no aplicado</div><div class="ds">Incremento anual según IPC o salario mínimo que Colpensiones omite.</div><div class="go">→</div></div>
+
+    <!-- LABORAL -->
+    <div class="case-card" data-area="laboral" data-ej="Me despidieron el 15 de marzo estando en el sexto mes de embarazo. Mi contrato era a término indefinido desde hace 3 años. La empresa no solicitó permiso al Ministerio del Trabajo."><span class="ab laboral">Laboral</span><div class="tt">Despido en embarazo (fuero materno)</div><div class="ds">Cualquier despido durante embarazo o 3 meses post-parto sin permiso del Mintrabajo.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="laboral" data-ej="Tuve incapacidad médica de 180 días por enfermedad común (depresión severa diagnosticada). Al reintegrarme la empresa me notificó terminación sin justa causa pagándome la indemnización."><span class="ab laboral">Laboral</span><div class="tt">Despido por incapacidad / salud</div><div class="ds">Estabilidad laboral reforzada en personas con condición de salud.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="laboral" data-ej="Llevo 4 años trabajando por contrato de prestación de servicios como profesional. Tengo horario fijo, subordinación, reportes semanales y uso las herramientas de la empresa. Nunca me han pagado prestaciones sociales."><span class="ab laboral">Laboral</span><div class="tt">Contrato prestación servicios disfrazado</div><div class="ds">Contrato de servicios con subordinación y horario (contrato realidad).</div><div class="go">→</div></div>
+    <div class="case-card" data-area="laboral" data-ej="Mi jefe me humilla frente a colegas, me cambia funciones sin aviso, me prohíbe tomar vacaciones. Desde hace 8 meses he bajado de peso, duermo mal. Tengo evidencia escrita (WhatsApp, correos)."><span class="ab laboral">Laboral</span><div class="tt">Acoso laboral / mobbing</div><div class="ds">Hostigamiento sistemático con evidencia documental o testigos.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="laboral" data-ej="La empresa dejó de pagarme el salario desde hace 2 meses. Tampoco han consignado la seguridad social. Tengo arriendo, servicios y alimentación atrasadas."><span class="ab laboral">Laboral</span><div class="tt">No pago de salario o seguridad social</div><div class="ds">Mínimo vital afectado; derecho a suspender contrato y reclamar.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="laboral" data-ej="Soy una persona con discapacidad auditiva reconocida. Mi empresa me notificó el despido sin permiso del Ministerio del Trabajo, alegando que ya no necesitan mi puesto."><span class="ab laboral">Laboral</span><div class="tt">Despido de persona con discapacidad</div><div class="ds">Estabilidad reforzada; requiere autorización del Ministerio del Trabajo.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="laboral" data-ej="Mi madre falleció el jueves. Pedí licencia de luto remunerada de 5 días según la ley y me la negaron diciendo que debo usar vacaciones."><span class="ab laboral">Laboral</span><div class="tt">Licencia de luto / paternidad negada</div><div class="ds">Licencias legales remuneradas que la empresa desconoce.</div><div class="go">→</div></div>
+
+    <!-- ACCIDENTES / SOAT -->
+    <div class="case-card" data-area="accidentes" data-ej="Tuve un accidente en moto el 10 de marzo. La Previsora (SOAT) me negó cobertura alegando que el otro conductor estaba embriagado. Yo no lo estaba y tengo 50% de pérdida capacidad por fractura."><span class="ab accidentes">Accidentes</span><div class="tt">SOAT niega atención tras accidente</div><div class="ds">Seguradora elude cobertura con excusas. Procede tutela por vida/salud.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="accidentes" data-ej="Fui atropellado por un carro que se dio a la fuga. La clínica me cobra los 30 días que estuve hospitalizado porque no hay responsable identificado y el SOAT solo cubre 800 SMDLV."><span class="ab accidentes">Accidentes</span><div class="tt">Hospitalización no cubierta (carro fantasma)</div><div class="ds">Fondo FOSYGA / ADRES debe responder cuando no hay responsable identificado.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="accidentes" data-ej="Sufrí accidente de tránsito con 45% pérdida capacidad laboral. Soy trabajador independiente. La ARL dice que yo debo cotizar como independiente. Colpensiones tampoco responde."><span class="ab accidentes">Accidentes</span><div class="tt">Incapacidades e indemnización ignoradas</div><div class="ds">Pago de incapacidades laborales y daños tras accidente de tránsito.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="accidentes" data-ej="La aseguradora solo cubrió los primeros días del hospital. Los demás 20 días me los cobran a mí. Tengo copia de los pagos de SOAT vigentes al momento del accidente."><span class="ab accidentes">Accidentes</span><div class="tt">Cobertura SOAT insuficiente</div><div class="ds">Agotamiento prematuro de los 800 SMDLV sin habilitar FOSYGA.</div><div class="go">→</div></div>
+
+    <!-- INSOLVENCIA -->
+    <div class="case-card" data-area="insolvencia" data-ej="El banco embargó mi cuenta de ahorros donde me depositan el salario mínimo cada mes. Es la única cuenta que tengo. Sin ese dinero no puedo comer ni pagar arriendo."><span class="ab insolvencia">Insolvencia</span><div class="tt">Embargo de cuenta de nómina / mínimo vital</div><div class="ds">Cuentas con salario mínimo son inembargables hasta 5 SMMLV.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="insolvencia" data-ej="Recibo mi pensión de vejez en mi cuenta de Bancolombia. Un banco embargó esa cuenta por un crédito en mora. Tengo 68 años y dependo 100% de esa pensión."><span class="ab insolvencia">Insolvencia</span><div class="tt">Embargo de cuenta pensional</div><div class="ds">Mesadas pensionales son inembargables (salvo alimentos).</div><div class="go">→</div></div>
+    <div class="case-card" data-area="insolvencia" data-ej="El banco inició proceso ejecutivo contra mí y embargó mi apartamento. Nunca me notificaron la demanda: se enviaron notificaciones a una dirección anterior de hace 4 años."><span class="ab insolvencia">Insolvencia</span><div class="tt">Proceso ejecutivo sin notificación válida</div><div class="ds">Defecto en notificación vulnera el debido proceso.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="insolvencia" data-ej="Tengo deudas por 35 millones con 4 bancos. Mis ingresos no alcanzan. Quiero acogerme al régimen de insolvencia persona natural Ley 1564 para renegociar pero el Centro de Conciliación me niega la admisión."><span class="ab insolvencia">Insolvencia</span><div class="tt">Insolvencia persona natural rechazada</div><div class="ds">Ley 1564 de 2012 permite renegociar deudas; centros niegan a veces.</div><div class="go">→</div></div>
+
+    <!-- DERECHOS FUNDAMENTALES -->
+    <div class="case-card" data-area="derechos_fundamentales" data-ej="La DIAN me inició cobro coactivo por 15 millones por una declaración de renta del 2019 que yo no debo. Embargaron mi salario sin que me hayan notificado el mandamiento de pago."><span class="ab derechos_fundamentales">DD.FF.</span><div class="tt">Cobro coactivo DIAN sin debido proceso</div><div class="ds">Embargo administrativo sin notificación o sin título ejecutivo claro.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="derechos_fundamentales" data-ej="Me llegó una fotomulta por 600 mil del 2022. Nunca me notificaron en su momento. Ahora aparece en cobro coactivo y no me dejan renovar la licencia."><span class="ab derechos_fundamentales">DD.FF.</span><div class="tt">Fotomulta sin notificación</div><div class="ds">Comparendos sin notificación personal ni avisos en 6 meses.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="derechos_fundamentales" data-ej="Mi esposo fue absuelto en primera instancia. Apeló la Fiscalía hace 2 años y el Tribunal Superior no ha resuelto. Mi esposo sigue en detención preventiva sin tener fallo condenatorio."><span class="ab derechos_fundamentales">DD.FF.</span><div class="tt">Mora judicial / plazo razonable</div><div class="ds">Procesos sin decisión por años. Tutela por plazo razonable.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="derechos_fundamentales" data-ej="Mi hermano lleva 14 meses en prisión y ya cumplió la pena que le imponen en primera instancia (12 meses). El juzgado no resuelve la solicitud de libertad inmediata."><span class="ab derechos_fundamentales">DD.FF.</span><div class="tt">Libertad inmediata por pena cumplida</div><div class="ds">Procedimiento para obtener libertad cuando se cumplió la pena.</div><div class="go">→</div></div>
+    <div class="case-card" data-area="derechos_fundamentales" data-ej="Presenté derecho de petición a la Alcaldía hace 45 días pidiendo copia de un expediente urbanístico y no me han respondido. La ley da 15 días."><span class="ab derechos_fundamentales">DD.FF.</span><div class="tt">Derecho de petición sin respuesta</div><div class="ds">Entidad pública o privada con función pública que no responde en término.</div><div class="go">→</div></div>
   </div>
 </section>
 
@@ -688,6 +840,16 @@ document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>
 
 async function track(type, payload){
   try{await fetch('/api/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type,payload})});}catch(e){}
+  // Facebook Pixel events si está cargado
+  try{
+    if(typeof fbq === 'function'){
+      if(type === 'preview_done')        fbq('track','Lead');
+      else if(type === 'register')       fbq('track','CompleteRegistration');
+      else if(type === 'otp_verified')   fbq('track','Contact');
+      else if(type === 'downloaded')     fbq('trackCustom','SimulacionDescargada');
+      else if(type === 'meeting_booked') fbq('track','Schedule');
+    }
+  }catch(e){}
 }
 
 // CTA sticky en mobile cuando scrollee
@@ -698,13 +860,27 @@ window.addEventListener('scroll',()=>{
 // ─── Wizard carrusel ─────────────────────────────────────────
 let wizStep = 1;
 const WIZ_HINTS = {
-  salud:      {acc:'Ej: EPS Sanitas, Sura, Compensar, Salud Total…', lbl:'Tu EPS o IPS'},
-  pensiones:  {acc:'Ej: Colpensiones, Porvenir, Protección, Old Mutual…', lbl:'Administradora de pensiones'},
-  laboral:    {acc:'Ej: nombre exacto de la empresa o empleador', lbl:'Empresa / empleador'},
-  accidentes: {acc:'Ej: Previsora, Seguros Bolívar, Sura SOAT…', lbl:'Aseguradora SOAT'},
-  insolvencia:{acc:'Ej: Banco Bogotá, Davivienda, Bancolombia…', lbl:'Entidad que embarga'},
-  derechos_fundamentales:{acc:'Ej: DIAN, Juzgado X, Alcaldía…', lbl:'Entidad accionada'},
+  salud:      {acc:'Ej: EPS Sanitas, Sura, Compensar, Salud Total…', lbl:'Tu EPS o IPS',
+               ej:'Mi EPS Sanitas me niega desde hace 2 meses la cirugía de rodilla que ordenó el ortopedista. Ya radiqué PQR y no responden. Tengo dolor crónico y no puedo caminar bien. Tengo copia de la orden médica.'},
+  pensiones:  {acc:'Ej: Colpensiones, Porvenir, Protección, Old Mutual…', lbl:'Administradora de pensiones',
+               ej:'Radiqué mi solicitud de pensión de vejez en Colpensiones en enero. Hoy no me han respondido. Tengo 63 años y 1500 semanas cotizadas. Dependo de la pensión para vivir.'},
+  laboral:    {acc:'Ej: nombre exacto de la empresa o empleador', lbl:'Empresa / empleador',
+               ej:'Me despidieron el 15 de marzo estando en el sexto mes de embarazo. Tenía contrato a término indefinido desde hace 3 años. La empresa no pidió permiso al Ministerio del Trabajo.'},
+  accidentes: {acc:'Ej: Previsora, Seguros Bolívar, Sura SOAT…', lbl:'Aseguradora SOAT',
+               ej:'Tuve un accidente en moto el 10 de marzo. La aseguradora SOAT negó cobertura alegando que el otro conductor estaba ebrio. Yo no lo estaba y tengo 50% de pérdida capacidad por fractura.'},
+  insolvencia:{acc:'Ej: Banco Bogotá, Davivienda, Bancolombia…', lbl:'Entidad que embarga',
+               ej:'El banco embargó mi cuenta de ahorros donde me depositan el salario mínimo cada mes. Es la única cuenta que tengo. Sin ese dinero no puedo comer ni pagar arriendo.'},
+  derechos_fundamentales:{acc:'Ej: DIAN, Juzgado X, Alcaldía…', lbl:'Entidad accionada',
+               ej:'Presenté derecho de petición a la Alcaldía hace 45 días y no me han respondido. Solicité copia de un expediente al que tengo derecho. La ley da 15 días de plazo.'},
 };
+
+function aplicarHintsArea(area, placeholderTextarea=true){
+  const h = WIZ_HINTS[area]; if(!h) return;
+  const lbl = document.querySelector('#wiz-2 label'); if(lbl) lbl.textContent = h.lbl;
+  const inp = document.getElementById('o-accionado'); if(inp) inp.placeholder = h.acc;
+  const ta = document.getElementById('descripcion');
+  if(ta && placeholderTextarea) ta.placeholder = h.ej;
+}
 
 // Selección de tipo (paso 1.1)
 document.querySelectorAll('.tipo-card').forEach(c=>c.addEventListener('click',()=>{
@@ -713,10 +889,44 @@ document.querySelectorAll('.tipo-card').forEach(c=>c.addEventListener('click',()
   const area = c.dataset.area;
   document.getElementById('area').value = area;
   document.getElementById('wiz-next-1').disabled = false;
-  // Ajustar hint del paso 2
-  const h = WIZ_HINTS[area] || {acc:'', lbl:'Entidad accionada'};
-  const lbl = document.querySelector('#wiz-2 label'); if(lbl) lbl.textContent = h.lbl;
-  const inp = document.getElementById('o-accionado'); if(inp) inp.placeholder = h.acc;
+  aplicarHintsArea(area);
+}));
+
+// Acción bar: scroll al wizard
+function scrollToWizard(ev){
+  if(ev) ev.preventDefault();
+  const el = document.getElementById('step-1');
+  if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+  setTimeout(()=>{
+    const first = document.querySelector('.tipo-card');
+    if(first) first.focus();
+  }, 400);
+}
+
+// Carrusel casos: navegación con flechas
+function scrollCases(dir){
+  const s = document.getElementById('cases-scroll');
+  if(!s) return;
+  s.scrollBy({left: dir * 320, behavior:'smooth'});
+}
+
+// Click en case-card → preconfigura el wizard y salta a paso 4
+document.querySelectorAll('.case-card').forEach(c=>c.addEventListener('click',()=>{
+  const area = c.dataset.area;
+  const ej = c.dataset.ej || '';
+  // marcar la tarjeta del tipo
+  document.querySelectorAll('.tipo-card').forEach(x=>{
+    x.classList.toggle('sel', x.dataset.area === area);
+  });
+  document.getElementById('area').value = area;
+  document.getElementById('wiz-next-1').disabled = false;
+  aplicarHintsArea(area, false);   // no sobreescribir placeholder textarea porque llenamos value
+  // llenar textarea con el ejemplo (editable por el usuario)
+  const ta = document.getElementById('descripcion');
+  if(ta){ ta.value = ej; }
+  // ir al paso 4 directo
+  wizShow(4);
+  scrollToWizard();
 }));
 
 function wizShow(n){

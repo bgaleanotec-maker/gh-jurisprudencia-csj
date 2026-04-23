@@ -52,6 +52,7 @@ from app import tutela_lite as tl
 from app import ui as ui_mod
 from app import agenda as ag
 from app import auth as auth_mod
+from app import og_image as og_mod
 
 # ── App ────────────────────────────────────────────────────────────────────────
 
@@ -146,7 +147,34 @@ async def landing(request: Request):
     db_mod.track_event("page_view", ip=_ip_of(request),
                        user_agent=request.headers.get("user-agent",""),
                        referer=request.headers.get("referer",""))
-    return ui_mod.landing_html()
+    resp = HTMLResponse(ui_mod.landing_html())
+    # permitir embed en Facebook/Instagram (por defecto los browsers ya permiten;
+    # algunos hostings añaden X-Frame-Options: DENY). Lo relajamos:
+    allow_embed = os.environ.get("ALLOW_IFRAME_EMBED", "").strip().lower() in ("1","true","yes")
+    if allow_embed:
+        resp.headers["Content-Security-Policy"] = "frame-ancestors 'self' https://*.facebook.com https://*.instagram.com https://www.facebook.com"
+        if "X-Frame-Options" in resp.headers:
+            del resp.headers["X-Frame-Options"]
+    return resp
+
+
+@app.get("/og.png")
+async def og_image():
+    png = og_mod.generar_og_png()
+    return Response(content=png, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    # SVG inline (el <link> en el HTML ya tiene data:image/svg+xml). Este endpoint
+    # devuelve también un SVG para crawlers que buscan /favicon.ico directo.
+    svg = (b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">'
+           b'<rect width="64" height="64" rx="10" fill="#002347"/>'
+           b'<text x="50%" y="54%" font-family="Georgia,serif" font-size="42" '
+           b'font-weight="900" text-anchor="middle" fill="#C5A059">G</text></svg>')
+    return Response(content=svg, media_type="image/svg+xml",
+                    headers={"Cache-Control":"public, max-age=604800"})
 
 
 # ── Tracking público ──────────────────────────────────────────────────────────
