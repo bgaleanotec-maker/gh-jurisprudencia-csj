@@ -1599,20 +1599,61 @@ def lawyer_workspace_html(lawyer: dict, lead: dict) -> str:
 
   <!-- Case head -->
   <div class="case-head">
-    <div class="title">""" + esc(lead.get("name") or "Cliente sin registrar") + """</div>
-    <div class="meta">
-      CC """ + esc(lead.get("cedula") or "—") + """ · Tel <a href="https://wa.me/""" + esc(phone) + """" target="_blank">+""" + esc(phone) + """</a> · """ + esc(lead.get("email") or "—") + """
-      · Creado """ + esc((lead.get("created_at") or "")[:16]) + """
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
+      <div style="flex:1;min-width:260px">
+        <div class="title" id="hd-name">""" + esc(lead.get("name") or "Cliente sin registrar") + """</div>
+        <div class="meta" id="hd-meta">
+          CC <span id="hd-cedula">""" + esc(lead.get("cedula") or "—") + """</span>
+          · Tel <a href="https://wa.me/""" + esc(phone) + """" id="hd-wa" target="_blank">+<span id="hd-phone">""" + esc(phone) + """</span></a>
+          · <span id="hd-email">""" + esc(lead.get("email") or "—") + """</span>
+          · Creado """ + esc((lead.get("created_at") or "")[:16]) + """
+        </div>
+        <div class="badges">
+          <span class="status">""" + esc(lead.get("status") or "") + """</span>
+          <span id="hd-area">""" + esc(area or "sin área") + """</span>
+        </div>
+      </div>
+      <button class="btn outline btn-sm" onclick="toggleEditClient()" id="btn-edit-client">✏️ Editar datos</button>
     </div>
-    <div class="badges">
-      <span class="status">""" + esc(lead.get("status") or "") + """</span>
-      <span>""" + esc(area or "sin área") + """</span>
-    </div>
-    <div class="quick-actions">
-      <a class="btn green" href="https://wa.me/""" + esc(phone) + """" target="_blank">💬 WhatsApp</a>
+    <div class="quick-actions" style="margin-top:12px">
+      <a class="btn green" href="https://wa.me/""" + esc(phone) + """" target="_blank" id="qa-wa">💬 WhatsApp</a>
       <button class="btn gold" onclick="setStatus('contacted')">Marcar contactado</button>
       <button class="btn" onclick="setStatus('closed')">Cerrar caso</button>
       <a class="btn outline" href="/api/lead/download/""" + esc(lead.get("token","")) + """.docx" target="_blank">📥 Descargar borrador actual</a>
+    </div>
+  </div>
+
+  <!-- Editor de datos del cliente (oculto por default) -->
+  <div class="card" id="edit-client-box" style="display:none;border-top:3px solid #C5A059">
+    <h3>✏️ Editar datos del cliente <span class="tag">Requiere confirmación</span></h3>
+    <div class="sub">Los cambios se guardan contra la base de datos. Se envían al endpoint autenticado de abogado.</div>
+    <div class="row2">
+      <div><label>Nombre completo</label><input id="e-name" value=""" + '"' + esc(lead.get("name") or "") + '"' + """></div>
+      <div><label>Cédula</label><input id="e-cedula" value=""" + '"' + esc(lead.get("cedula") or "") + '"' + """></div>
+    </div>
+    <div class="row2" style="margin-top:8px">
+      <div><label>Teléfono (3XXXXXXXXX)</label><input id="e-phone" value=""" + '"' + esc(phone) + '"' + """></div>
+      <div><label>Email</label><input id="e-email" type="email" value=""" + '"' + esc(lead.get("email") or "") + '"' + """></div>
+    </div>
+    <div style="margin-top:8px">
+      <label>Área legal</label>
+      <select id="e-area">
+        <option value="">— sin clasificar —</option>
+        <option value="salud">Salud</option>
+        <option value="pensiones">Pensiones</option>
+        <option value="laboral">Laboral</option>
+        <option value="accidentes">Accidentes</option>
+        <option value="insolvencia">Insolvencia</option>
+        <option value="derechos_fundamentales">Derechos fundamentales</option>
+      </select>
+    </div>
+    <div style="margin-top:8px">
+      <label>Descripción del caso (afecta al RAG)</label>
+      <textarea id="e-desc" rows="5">""" + esc(lead.get("descripcion") or "") + """</textarea>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn green" onclick="saveClient()">💾 Guardar cambios</button>
+      <button class="btn outline" onclick="toggleEditClient()">Cancelar</button>
     </div>
   </div>
 
@@ -1695,6 +1736,63 @@ def lawyer_workspace_html(lawyer: dict, lead: dict) -> str:
 <script>
 const LEAD = """ + lead_json + """;
 let lastResult = "";
+
+// Preseleccionar el área actual en el select
+(function(){
+  const sel = document.getElementById('e-area');
+  if(sel && LEAD.area){
+    for(const o of sel.options){ if(o.value === LEAD.area){ o.selected = true; break; } }
+  }
+})();
+
+function toggleEditClient(){
+  const box = document.getElementById('edit-client-box');
+  const btn = document.getElementById('btn-edit-client');
+  const open = box.style.display !== 'none' && box.style.display !== '';
+  box.style.display = open ? 'none' : 'block';
+  btn.textContent = open ? '✏️ Editar datos' : '× Cerrar editor';
+  if(!open) box.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+async function saveClient(){
+  const body = {
+    name:        document.getElementById('e-name').value.trim(),
+    cedula:      document.getElementById('e-cedula').value.trim(),
+    phone:       document.getElementById('e-phone').value.trim(),
+    email:       document.getElementById('e-email').value.trim(),
+    area:        document.getElementById('e-area').value || null,
+    descripcion: document.getElementById('e-desc').value.trim(),
+  };
+  // Resumen de cambios para el confirm
+  const cambios = [];
+  if(body.name        !== (LEAD.name||''))        cambios.push('• Nombre: "'+ (LEAD.name||'(vacío)') + '" → "' + body.name + '"');
+  if(body.cedula      !== (LEAD.cedula||''))      cambios.push('• Cédula: "'+ (LEAD.cedula||'(vacío)') + '" → "' + body.cedula + '"');
+  if(body.phone       !== (LEAD.phone||''))       cambios.push('• Teléfono: "'+ (LEAD.phone||'(vacío)') + '" → "' + body.phone + '"');
+  if(body.email       !== (LEAD.email||''))       cambios.push('• Email: "'+ (LEAD.email||'(vacío)') + '" → "' + body.email + '"');
+  if(body.area        !== (LEAD.area||null))      cambios.push('• Área: "'+ (LEAD.area||'(vacío)') + '" → "' + (body.area||'(vacío)') + '"');
+  if(body.descripcion !== (LEAD.descripcion||'')) cambios.push('• Descripción del caso (modificada)');
+  if(cambios.length === 0){ alert('No hay cambios que guardar.'); return; }
+  if(!confirm('¿Confirmas actualizar los datos del cliente?\\n\\n' + cambios.join('\\n'))) return;
+  try{
+    await api('/api/pro/leads/'+LEAD.id,{method:'PATCH',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    toast('✓ Datos actualizados');
+    // Actualizar LEAD en memoria y la vista
+    Object.assign(LEAD, body);
+    document.getElementById('hd-name').textContent = body.name || 'Cliente sin registrar';
+    document.getElementById('hd-cedula').textContent = body.cedula || '—';
+    document.getElementById('hd-phone').textContent = body.phone || '—';
+    document.getElementById('hd-email').textContent = body.email || '—';
+    document.getElementById('hd-area').textContent  = body.area  || 'sin área';
+    const waUrl = 'https://wa.me/'+(body.phone||'');
+    document.getElementById('hd-wa').href = waUrl;
+    document.getElementById('qa-wa').href = waUrl;
+    // Actualizar también la caja de "Caso del cliente" (descripción)
+    const descBox = document.querySelector('.cliente-desc');
+    if(descBox) descBox.textContent = body.descripcion;
+    toggleEditClient();
+  }catch(e){ alert('Error: ' + e.message); }
+}
 
 function toast(msg){
   const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');

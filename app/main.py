@@ -850,6 +850,48 @@ async def pro_lead_detail(lid: int, lawyer: dict = Depends(auth_mod.require_lawy
     raise HTTPException(404, "no encontrado")
 
 
+class ProLeadEdit(BaseModel):
+    name:        Optional[str] = None
+    cedula:      Optional[str] = None
+    phone:       Optional[str] = None
+    email:       Optional[str] = None
+    area:        Optional[str] = None
+    descripcion: Optional[str] = None
+
+
+@app.patch("/api/pro/leads/{lid}")
+async def pro_edit_lead(lid: int, body: ProLeadEdit, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    """Permite al abogado actualizar los datos del cliente."""
+    with db_mod.db() as c:
+        r = c.execute("SELECT id, lawyer_id, area FROM leads WHERE id=?", (lid,)).fetchone()
+        if not r: raise HTTPException(404, "lead no encontrado")
+        areas = set(lawyer.get("areas") or [])
+        if r["lawyer_id"] != lawyer["id"] and not ("*" in areas or r["area"] in areas):
+            raise HTTPException(403, "no autorizado")
+        updates, params = [], []
+        if body.name is not None:        updates.append("name=?");        params.append(body.name.strip())
+        if body.cedula is not None:      updates.append("cedula=?");      params.append(body.cedula.strip())
+        if body.phone is not None:
+            ph = wa.normalizar_telefono(body.phone)
+            if ph and not wa.es_celular_colombia(ph):
+                raise HTTPException(400, "Celular Colombia inválido (formato 3XXXXXXXXX).")
+            updates.append("phone=?"); params.append(ph or body.phone.strip())
+        if body.email is not None:       updates.append("email=?");       params.append(body.email.strip().lower())
+        if body.area is not None:
+            if body.area and body.area not in ("salud","pensiones","laboral","accidentes","insolvencia","derechos_fundamentales"):
+                raise HTTPException(400, "Área inválida.")
+            updates.append("area=?"); params.append(body.area)
+        if body.descripcion is not None:
+            if len(body.descripcion.strip()) < 10:
+                raise HTTPException(400, "La descripción es muy corta.")
+            updates.append("descripcion=?"); params.append(body.descripcion.strip())
+        if not updates:
+            return {"ok": True, "updated": 0}
+        params.append(lid)
+        c.execute(f"UPDATE leads SET {', '.join(updates)} WHERE id=?", params)
+    return {"ok": True, "updated": len(updates)}
+
+
 class ProDraftSave(BaseModel):
     draft: str = Field(..., min_length=10)
     notes: Optional[str] = None
