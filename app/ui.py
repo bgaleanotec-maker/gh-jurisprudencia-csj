@@ -43,18 +43,13 @@ def landing_html() -> str:
   .logo span{color:var(--oro);}
   .nav-links a{color:var(--azul);text-decoration:none;font-size:13px;margin-left:18px;font-weight:600;}
 
-  /* HERO */
-  .hero{background:linear-gradient(135deg,var(--azul) 0%,var(--azul-2) 100%);color:#fff;padding:56px 16px 80px;text-align:center;position:relative;overflow:hidden;}
-  .hero::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:var(--oro);}
-  .hero::after{content:'';position:absolute;bottom:-50px;right:-50px;width:200px;height:200px;background:radial-gradient(circle,rgba(197,160,89,.15) 0%,transparent 70%);}
-  .hero h1{font-size:42px;font-weight:800;line-height:1.1;max-width:880px;margin:0 auto 16px;letter-spacing:-1.2px;}
+  /* HERO sobrio */
+  .hero{background:var(--azul);color:#fff;padding:52px 16px 56px;text-align:center;border-bottom:3px solid var(--oro);}
+  .hero h1{font-size:36px;font-weight:700;line-height:1.2;max-width:820px;margin:0 auto 14px;letter-spacing:-.5px;}
   .hero h1 .resaltar{color:var(--oro);}
-  .hero p.lead{font-size:18px;opacity:.94;max-width:640px;margin:0 auto 28px;font-weight:300;}
-  .live-counter{display:inline-flex;align-items:center;gap:8px;background:rgba(22,163,74,.18);border:1px solid rgba(22,163,74,.4);padding:7px 16px;border-radius:24px;font-size:13px;font-weight:600;margin-bottom:18px;}
-  .pulse{width:8px;height:8px;background:var(--verde);border-radius:50%;animation:pulse 1.4s infinite;}
-  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
-  .badges{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;}
-  .badge-trust{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);padding:6px 14px;border-radius:30px;font-size:12px;font-weight:600;backdrop-filter:blur(4px);}
+  .hero p.lead{font-size:17px;opacity:.9;max-width:620px;margin:0 auto 24px;font-weight:300;line-height:1.5;}
+  .badges{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:20px;}
+  .badge-trust{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);padding:5px 12px;border-radius:4px;font-size:12px;font-weight:500;}
 
   /* BARRA STATS */
   .stats-bar{background:#fff;padding:24px 16px;border-bottom:1px solid var(--gris-soft);}
@@ -210,35 +205,30 @@ def landing_html() -> str:
 </header>
 
 <section class="hero">
-  <div class="live-counter">
-    <span class="pulse"></span>
-    <span id="live-count">Cargando estadísticas...</span>
-  </div>
   <h1>Tu tutela <span class="resaltar">respaldada en jurisprudencia real</span> de la Corte Suprema</h1>
-  <p class="lead">Cuéntanos qué te pasó. Nuestro motor jurídico analiza tu caso contra 625 sentencias reales de la CSJ y te entrega una <b>simulación profesional de tu tutela</b>, lista para validar con un abogado.</p>
+  <p class="lead">Cuéntanos tu caso. Analizamos contra sentencias reales de la Sala Civil, Laboral, Penal y Plena de la CSJ y generamos una simulación de tu acción de tutela para que la valides con un abogado.</p>
   <div class="badges">
-    <span class="badge-trust">📚 625 sentencias CSJ 2018–2025</span>
-    <span class="badge-trust">⚖️ Radicados verificables</span>
-    <span class="badge-trust">📲 Verificación por WhatsApp</span>
-    <span class="badge-trust">🔒 Habeas Data Ley 1581</span>
+    <span class="badge-trust">📚 Sentencias CSJ 2018–2025</span>
+    <span class="badge-trust">⚖️ Radicados verificables en relatoría.cortesuprema.gov.co</span>
+    <span class="badge-trust">🔒 Ley 1581 · Habeas Data</span>
   </div>
 </section>
 
 <section class="stats-bar">
   <div class="grid">
-    <div class="stat"><div class="num" id="s-fichas">625</div><div class="lbl">Sentencias indexadas</div></div>
-    <div class="stat"><div class="num" id="s-leads">…</div><div class="lbl">Casos analizados</div></div>
-    <div class="stat"><div class="num">≤ 2 h</div><div class="lbl">Respuesta del abogado</div></div>
+    <div class="stat"><div class="num" id="s-fichas">—</div><div class="lbl">Sentencias indexadas</div></div>
+    <div class="stat"><div class="num">6</div><div class="lbl">Áreas legales cubiertas</div></div>
+    <div class="stat"><div class="num">4</div><div class="lbl">Salas CSJ (Civil · Laboral · Penal · Plena)</div></div>
     <div class="stat"><div class="num">$0</div><div class="lbl">Costo de la simulación</div></div>
   </div>
 </section>
 
 <div class="container">
   <div class="pasos">
-    <div class="paso"><div class="num">1</div><div class="t">Cuenta tu caso</div><div class="d">Sin formularios largos</div></div>
-    <div class="paso"><div class="num">2</div><div class="t">Lee la simulación</div><div class="d">Con citas reales CSJ</div></div>
+    <div class="paso"><div class="num">1</div><div class="t">Cuenta tu caso</div><div class="d">Una sola pantalla</div></div>
+    <div class="paso"><div class="num">2</div><div class="t">Lee la simulación</div><div class="d">Con radicados CSJ</div></div>
     <div class="paso"><div class="num">3</div><div class="t">Verifícate</div><div class="d">Código WhatsApp</div></div>
-    <div class="paso"><div class="num">4</div><div class="t">Agenda cita gratis</div><div class="d">Por Google Meet</div></div>
+    <div class="paso"><div class="num">4</div><div class="t">Agenda llamada</div><div class="d">Con un abogado</div></div>
   </div>
 
   <!-- STEP 1: DESCRIBIR -->
@@ -263,7 +253,7 @@ def landing_html() -> str:
         <option value="derechos_fundamentales">Otros derechos fundamentales</option>
       </select>
     </div>
-    <button class="btn" onclick="generarPreview()">⚡ Generar simulación gratis</button>
+    <button class="btn" onclick="generarPreview()">Generar simulación gratis</button>
     <div class="spinner" id="spinner-1"><div class="dot"></div><div class="dot"></div><div class="dot"></div><br><br>Analizando contra jurisprudencia de la Corte Suprema…</div>
     <div id="err-1"></div>
   </div>
@@ -282,8 +272,8 @@ def landing_html() -> str:
         <div class="candado">
           <div class="icon">🔓</div>
           <h3>Desbloquea la simulación completa</h3>
-          <p>Para descargarla en Word y agendar tu cita gratuita con un abogado, completa tu registro. Tarda 30 segundos.</p>
-          <button class="btn gold" style="max-width:300px" onclick="irRegistro()">Continuar — es gratis</button>
+          <p>Para descargarla en Word y agendar una llamada con un abogado, completa tu registro.</p>
+          <button class="btn" style="max-width:300px" onclick="irRegistro()">Continuar</button>
         </div>
       </div>
     </div>
@@ -372,7 +362,7 @@ def landing_html() -> str:
     </div>
 
     <div class="alert alert-info" style="margin-top:20px">
-      <strong>Próximo paso:</strong> Si no agendas ahora, un abogado te escribirá por WhatsApp en menos de <b>2 horas hábiles</b>.
+      <strong>Próximo paso:</strong> Si no agendas ahora, un abogado te escribirá por WhatsApp en horario hábil.
     </div>
   </div>
 
@@ -392,29 +382,35 @@ def landing_html() -> str:
   </div>
 </div>
 
-<!-- CASOS / SOCIAL PROOF -->
+<!-- ÁREAS QUE CUBRIMOS -->
 <section class="bloque gris" id="casos">
   <div class="container-wide">
-    <h2 class="section-title">Casos representativos</h2>
-    <p class="section-sub">Tipos de procesos donde nuestra plataforma ha apoyado a clientes con jurisprudencia sólida.</p>
+    <h2 class="section-title">Áreas que cubrimos</h2>
+    <p class="section-sub">Tipos de procesos para los que la base jurisprudencial está entrenada. Cada simulación cita radicados verificables de la CSJ.</p>
     <div class="casos-grid">
       <div class="caso">
-        <div class="titulo">🏥 Tutela contra EPS</div>
-        <div class="resultado">✓ Autorización en 48 horas</div>
-        <div class="desc">"La EPS me negó la cirugía de cadera durante 4 meses. Con la simulación validada, el juez concedió medida provisional el segundo día."</div>
-        <div class="badge">Caso similar a STC8916-2023</div>
+        <div class="titulo">🏥 Salud · Tutelas contra EPS</div>
+        <div class="desc">Negativas de medicamentos, cirugías, tratamientos oncológicos y exámenes prescritos. Principio de continuidad, integralidad y mínimo vital en salud.</div>
       </div>
       <div class="caso">
-        <div class="titulo">🤰 Despido en embarazo</div>
-        <div class="resultado">✓ Reintegro + $18M</div>
-        <div class="desc">"Me despidieron en el séptimo mes. La tutela se concedió con reintegro y pago de salarios + indemnización por despido injustificado."</div>
-        <div class="badge">Caso similar a STL15780-2021</div>
+        <div class="titulo">🤰 Laboral · Fuero materno y despidos</div>
+        <div class="desc">Despidos durante embarazo, licencia de maternidad o lactancia. Estabilidad laboral reforzada. Contratos disfrazados de prestación de servicios.</div>
       </div>
       <div class="caso">
-        <div class="titulo">👴 Pensión Colpensiones</div>
-        <div class="resultado">✓ Resolución en 30 días</div>
-        <div class="desc">"Llevaba 11 meses esperando respuesta. Tras la tutela, Colpensiones reconoció la pensión con retroactivo de un año."</div>
-        <div class="badge">Caso similar a STC6385-2024</div>
+        <div class="titulo">👴 Pensiones · Colpensiones y AFP</div>
+        <div class="desc">Mora en el reconocimiento pensional, indemnización sustitutiva, sustitución pensional y pensión de invalidez.</div>
+      </div>
+      <div class="caso">
+        <div class="titulo">🚗 Accidentes de tránsito · SOAT</div>
+        <div class="desc">Negativa de aseguradoras a cubrir atención médica, incapacidades e indemnizaciones tras accidentes de tránsito.</div>
+      </div>
+      <div class="caso">
+        <div class="titulo">📉 Insolvencia · Persona natural</div>
+        <div class="desc">Régimen de insolvencia Ley 1564. Protección frente a embargos sobre el mínimo vital.</div>
+      </div>
+      <div class="caso">
+        <div class="titulo">⚖️ Derechos fundamentales</div>
+        <div class="desc">Debido proceso, mora judicial, fotomultas, cobros coactivos, acceso a documentos públicos y derecho de petición.</div>
       </div>
     </div>
   </div>
@@ -449,7 +445,7 @@ def landing_html() -> str:
     <p class="section-sub" style="margin-bottom:24px">Lo que la mayoría de personas pregunta antes de agendar.</p>
 
     <details><summary>¿Es realmente gratis?</summary>
-    <div class="body">Sí. Generar la simulación, descargar el documento Word y la consulta inicial de 30 minutos por Meet con un abogado son <b>100% gratis</b>. Si después decides que te representemos en el proceso, los honorarios típicos están entre $150.000 y $300.000 para tutelas de salud.</div></details>
+    <div class="body">Generar la simulación, descargar el documento Word y la consulta inicial de 30 minutos por WhatsApp con un abogado son gratis. Si luego decides que te representemos en el proceso, conversamos los honorarios según la complejidad del caso.</div></details>
 
     <details><summary>¿La simulación sirve para presentarla yo mismo en el juzgado?</summary>
     <div class="body">Es un excelente punto de partida, pero <b>no recomendamos</b> presentarla sin que un abogado la revise. La tutela tiene requisitos formales (legitimación, subsidiariedad, inmediatez) que un juez puede usar para inadmitirla. La revisión por nuestro equipo cuesta menos de lo que te ahorras.</div></details>
@@ -473,7 +469,7 @@ def landing_html() -> str:
 
 <!-- CTA STICKY MOBILE -->
 <div class="cta-sticky" id="cta-sticky">
-  <button class="btn gold" style="padding:10px 18px;font-size:14px" onclick="document.getElementById('step-1').scrollIntoView({behavior:'smooth'});document.getElementById('descripcion').focus();">⚡ Generar simulación</button>
+  <button class="btn" style="padding:10px 18px;font-size:14px" onclick="document.getElementById('step-1').scrollIntoView({behavior:'smooth'});document.getElementById('descripcion').focus();">Generar simulación</button>
 </div>
 
 <div class="disclaimer-fijo">
@@ -685,23 +681,15 @@ async function confirmarCita(){
   }
 }
 
-// Live counter
+// Cargar stat real (cantidad de sentencias indexadas)
 async function cargarStats(){
   try{
     const r = await fetch('/salud');
     const s = await r.json();
-    document.getElementById('s-fichas').textContent = s.fichas || 625;
-    // Para "casos analizados" hacemos un pseudo-counter realista basado en sesiones
-    const fakeBase = 1240 + Math.floor(Math.random()*10);
-    document.getElementById('s-leads').textContent = fakeBase.toLocaleString('es-CO');
-    document.getElementById('live-count').textContent =
-      `${Math.floor(Math.random()*3)+2} personas analizando su caso ahora`;
-  }catch(e){
-    document.getElementById('live-count').textContent = '625 sentencias listas para analizar tu caso';
-  }
+    document.getElementById('s-fichas').textContent = (s.fichas||'').toLocaleString('es-CO');
+  }catch(e){}
 }
 cargarStats();
-setInterval(cargarStats, 30000);
 </script>
 </body>
 </html>"""

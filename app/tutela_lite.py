@@ -54,13 +54,22 @@ def detectar_area(texto: str) -> Optional[str]:
 
 # ── Cache LRU en memoria ──────────────────────────────────────────────────────
 
-_CACHE_MAX = 200
+_CACHE_MAX = 500
 _cache: "OrderedDict[str, dict]" = OrderedDict()
 _cache_lock = threading.Lock()
 
 
+def _normalizar_para_cache(desc: str) -> str:
+    """Normaliza para que 'Me niega, Sanitas!' y 'me niega sanitas' peguen al mismo cache."""
+    t = (desc or "").lower().strip()
+    # Quitar puntuación y múltiples espacios
+    t = re.sub(r"[^\w\sáéíóúüñ]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t[:1500]
+
+
 def _cache_key(desc: str, area: Optional[str]) -> str:
-    raw = ((area or "") + "::" + (desc or "").lower().strip()[:1500])
+    raw = ((area or "") + "::" + _normalizar_para_cache(desc))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -204,12 +213,21 @@ def generar_borrador(motor, descripcion: str, area: Optional[str] = None,
     prompt   = _prompt_publico(descripcion, contexto, datos_cliente)
 
     from google.genai import types as genai_types
+
+    # Intento con cascada de modelos: flash-lite primero (cuota propia),
+    # luego 2.0-flash. 5 intentos en total con backoff exponencial.
+    MODELOS = ["gemini-2.0-flash-lite", "gemini-2.0-flash"]
     texto = ""
     last_err = None
-    for intento in range(3):
+    BACKOFFS = [0, 4, 8, 15, 25]   # segundos entre intentos
+
+    for intento in range(5):
+        modelo = MODELOS[intento % len(MODELOS)]
+        if BACKOFFS[intento]:
+            time.sleep(BACKOFFS[intento])
         try:
             r = motor._client.models.generate_content(
-                model="gemini-2.0-flash",
+                model=modelo,
                 contents=prompt,
                 config=genai_types.GenerateContentConfig(
                     temperature=0.15,
@@ -217,26 +235,32 @@ def generar_borrador(motor, descripcion: str, area: Optional[str] = None,
                 ),
             )
             texto = (r.text or "").strip()
-            break
+            if texto:
+                break
         except Exception as e:
             last_err = e
             msg = str(e)
-            # 429 / RESOURCE_EXHAUSTED → backoff exponencial
-            if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
-                if intento < 2:
-                    time.sleep(2 ** intento + 1.0)   # 2s, 3s
-                    continue
-                return {
-                    "error": "rate_limited",
-                    "user_message": (
-                        "Estamos atendiendo a muchos usuarios en este momento. "
-                        "Intenta de nuevo en 1 minuto. Si el problema persiste, "
-                        "contáctanos directamente por WhatsApp."
-                    ),
-                    "draft": "", "fichas": [],
-                }
-            # Otros errores: no reintentamos
-            return {"error": f"Error generando: {e}", "user_message": "Hubo un problema técnico. Intenta de nuevo en unos minutos.", "draft": "", "fichas": []}
+            # 429 / RESOURCE_EXHAUSTED → seguir al siguiente modelo/intento
+            if any(tag in msg for tag in ("429", "RESOURCE_EXHAUSTED", "quota", "Quota")):
+                continue
+            # Modelo no disponible → probar el siguiente
+            if "404" in msg or "NOT_FOUND" in msg:
+                continue
+            # Errores no recuperables
+            return {"error": f"Error generando: {e}",
+                    "user_message": "Hubo un problema técnico. Intenta de nuevo en unos minutos.",
+                    "draft": "", "fichas": []}
+
+    if not texto:
+        return {
+            "error": "rate_limited",
+            "user_message": (
+                "Estamos atendiendo a muchos usuarios en este momento. "
+                "Espera 1 minuto y vuelve a intentar. "
+                "Si el problema persiste, escríbenos por WhatsApp y te atendemos directamente."
+            ),
+            "draft": "", "fichas": [],
+        }
 
     if not texto:
         return {"error": str(last_err) if last_err else "Sin respuesta del modelo",
