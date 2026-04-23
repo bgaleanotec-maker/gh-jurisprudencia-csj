@@ -169,6 +169,11 @@ async def track(req: TrackReq, request: Request):
 class LeadPreviewReq(BaseModel):
     descripcion: str = Field(..., min_length=30, max_length=4000)
     area: Optional[str] = None
+    # Datos orientadores (opcionales) — si vienen, el borrador los usa literales
+    nombre: Optional[str] = None
+    cedula: Optional[str] = None
+    ciudad: Optional[str] = None
+    accionado: Optional[str] = None
 
 class LeadRegisterReq(BaseModel):
     token: str
@@ -196,9 +201,19 @@ async def lead_preview(req: LeadPreviewReq, request: Request):
                        user_agent=request.headers.get("user-agent",""),
                        payload={"area": req.area, "len": len(req.descripcion)})
 
+    # Datos orientadores (si el usuario los llenó)
+    datos_orient = {
+        k: (getattr(req, k) or "").strip()
+        for k in ("nombre","cedula","ciudad","accionado")
+        if getattr(req, k, None)
+    } or None
+
     # 1) Cache primero (no consume rate limit ni cuota Gemini)
     area_auto = req.area or tl.detectar_area(req.descripcion)
-    hit = tl.cache_get(req.descripcion, area_auto)
+    cache_extra = ""
+    if datos_orient:
+        cache_extra = "|".join(str(datos_orient.get(k,"")).lower() for k in ("nombre","cedula","accionado","ciudad"))
+    hit = tl.cache_get(req.descripcion, area_auto, extra=cache_extra)
     motor = get_motor()
     if hit:
         res = dict(hit); res["cached"] = True
@@ -206,7 +221,8 @@ async def lead_preview(req: LeadPreviewReq, request: Request):
         # 2) Rate limit solo para queries NUEVAS (abuso real)
         if not db_mod.check_rate(ip, max_per_hour=15):
             raise HTTPException(429, "Has excedido el límite de simulaciones por hora desde esta conexión. Intenta en 1 hora o escríbenos por WhatsApp.")
-        res = tl.generar_borrador(motor, req.descripcion, area=req.area)
+        res = tl.generar_borrador(motor, req.descripcion, area=req.area,
+                                  datos_cliente=datos_orient)
     if "error" in res:
         msg = res.get("user_message") or res["error"]
         code = 503 if res["error"] == "rate_limited" else 400

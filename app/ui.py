@@ -106,15 +106,15 @@ def landing_html() -> str:
   .btn.gold:hover{background:#b08a47;}
   .btn.outline{background:transparent;color:var(--azul);border:2px solid var(--azul);}
 
-  /* PREVIEW */
-  .preview-wrap{position:relative;background:#fafbfc;border:1px solid var(--gris-soft);border-radius:10px;padding:24px;font-family:'Georgia',serif;font-size:14px;line-height:1.7;max-height:560px;overflow:hidden;}
-  .preview-visible{white-space:pre-wrap;}
-  .preview-blur{position:relative;margin-top:12px;}
-  .preview-blur .texto{filter:blur(7px);user-select:none;color:#888;white-space:pre-wrap;height:300px;overflow:hidden;}
-  .preview-blur .candado{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(180deg,rgba(255,255,255,0) 0%,rgba(255,255,255,.97) 50%);text-align:center;padding:24px;}
-  .preview-blur .candado .icon{font-size:42px;margin-bottom:8px;}
-  .preview-blur .candado h3{font-size:18px;color:var(--azul);margin-bottom:8px;}
-  .preview-blur .candado p{font-size:13px;color:#555;margin-bottom:14px;max-width:400px;}
+  /* PREVIEW — sin overflow hidden en wrap, para que el candado y botón se vean siempre */
+  .preview-wrap{background:#fafbfc;border:1px solid var(--gris-soft);border-radius:10px;padding:24px 24px 0;font-family:'Georgia',serif;font-size:14px;line-height:1.7;}
+  .preview-visible{white-space:pre-wrap;max-height:420px;overflow:hidden;-webkit-mask-image:linear-gradient(180deg,#000 85%,transparent 100%);mask-image:linear-gradient(180deg,#000 85%,transparent 100%);}
+  .preview-blur{position:relative;margin-top:0;padding:20px 0 24px;text-align:center;}
+  .preview-blur .candado-box{background:linear-gradient(180deg,#fff 0%,var(--gris) 100%);border:1px solid var(--gris-soft);border-radius:10px;padding:28px 20px;margin-top:-40px;position:relative;z-index:2;}
+  .preview-blur .candado-box .icon{font-size:44px;margin-bottom:8px;display:inline-block;}
+  .preview-blur .candado-box h3{font-size:20px;color:var(--azul);margin-bottom:8px;font-weight:800;}
+  .preview-blur .candado-box p{font-size:14px;color:#555;margin-bottom:18px;max-width:440px;margin-left:auto;margin-right:auto;}
+  .preview-blur .candado-box .btn{max-width:320px;margin:0 auto;}
 
   .fichas-tag{display:inline-block;background:#e3f0ff;color:#004a9f;padding:5px 11px;border-radius:14px;font-size:11px;font-weight:700;margin:3px;}
 
@@ -257,12 +257,38 @@ def landing_html() -> str:
   <div class="card step on" id="step-1">
     <div class="nav-step">Paso 1 de 5</div>
     <h2>Cuéntame qué está pasando</h2>
-    <p class="muted" style="margin-bottom:20px">Sin formularios complicados. Escribe como le contarías a un amigo: qué pasó, contra quién, desde cuándo.</p>
+    <p class="muted" style="margin-bottom:20px">Escribe como le contarías a un amigo: qué pasó, contra quién, desde cuándo. Mientras más datos completes, menos <i>[COMPLETAR]</i> tendrá tu borrador.</p>
 
     <div class="form-group">
       <label>Tu caso *</label>
-      <textarea id="descripcion" autofocus placeholder="Por ejemplo: Mi EPS me niega desde hace dos meses la cirugía que me mandó el especialista. Ya reclamé y no responden. No puedo caminar bien..."></textarea>
+      <textarea id="descripcion" autofocus placeholder="Por ejemplo: Mi EPS Sanitas me niega desde hace dos meses la cirugía de rodilla que ordenó el ortopedista. Ya radiqué reclamación el 15 de marzo y no responden. No puedo caminar sin dolor..."></textarea>
     </div>
+
+    <details style="margin:14px 0;background:#f6f8fb;border-radius:8px;padding:14px">
+      <summary style="cursor:pointer;font-weight:700;color:var(--azul);font-size:14px;list-style:none">✍️ Datos para que el borrador salga más listo (opcional · 30 s)</summary>
+      <p class="muted" style="margin:10px 0 14px;font-size:13px">Los usamos para rellenar el documento. Si no los llenas, salen como <i>[COMPLETAR]</i>.</p>
+      <div class="row">
+        <div class="form-group">
+          <label>Tu nombre completo</label>
+          <input type="text" id="o-nombre" placeholder="María García López">
+        </div>
+        <div class="form-group">
+          <label>Tu cédula</label>
+          <input type="text" id="o-cedula" inputmode="numeric" placeholder="1.234.567.890">
+        </div>
+      </div>
+      <div class="row">
+        <div class="form-group">
+          <label>Ciudad</label>
+          <input type="text" id="o-ciudad" placeholder="Bogotá D.C." value="Bogotá D.C.">
+        </div>
+        <div class="form-group">
+          <label>Contra quién (entidad/empresa)</label>
+          <input type="text" id="o-accionado" placeholder="EPS Sanitas S.A.S.">
+        </div>
+      </div>
+    </details>
+
     <div class="form-group">
       <label>Tipo de caso</label>
       <select id="area">
@@ -290,12 +316,11 @@ def landing_html() -> str:
     <div class="preview-wrap">
       <div class="preview-visible" id="preview-visible"></div>
       <div class="preview-blur">
-        <div class="texto" id="preview-blur-texto"></div>
-        <div class="candado">
+        <div class="candado-box">
           <div class="icon">🔓</div>
-          <h3>Desbloquea la simulación completa</h3>
-          <p>Para descargarla en Word y agendar una llamada con un abogado, completa tu registro.</p>
-          <button class="btn" style="max-width:300px" onclick="irRegistro()">Continuar</button>
+          <h3>Desbloquea el borrador completo</h3>
+          <p>Fundamentos jurídicos con citas, pretensiones, medida provisional, pruebas, juramento y firma. Listo para que tu abogado lo revise.</p>
+          <button class="btn" onclick="irRegistro()">Continuar — desbloquear</button>
         </div>
       </div>
     </div>
@@ -372,7 +397,24 @@ def landing_html() -> str:
       <p style="margin-top:8px">Tu simulación está desbloqueada y un abogado fue notificado de tu caso.</p>
     </div>
 
-    <button class="btn gold" id="btn-descargar" style="margin-bottom:14px">📥 Descargar simulación (.docx)</button>
+    <button class="btn" id="btn-descargar" style="margin-bottom:14px">📥 Descargar simulación (.docx)</button>
+
+    <!-- UPSELL: sin papeleos + 10% descuento -->
+    <div id="upsell-box" style="background:linear-gradient(135deg,#C5A059 0%,#b08a47 100%);color:#fff;padding:22px;border-radius:12px;margin:18px 0;text-align:left">
+      <div style="font-size:18px;font-weight:800;margin-bottom:8px">📋 ¿No quieres papeleos?</div>
+      <div style="font-size:14px;margin-bottom:12px;opacity:.95;line-height:1.5">
+        Que un abogado de Galeano Herrera presente TODO por ti:<br>
+        ✓ Radicación en el juzgado · ✓ Seguimiento del fallo<br>
+        ✓ Notificación al accionado · ✓ Atención de impugnaciones
+      </div>
+      <div style="background:rgba(255,255,255,.2);padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:15px;font-weight:700">
+        🎁 Descuento del 10% si contratas HOY
+      </div>
+      <a id="upsell-wa" href="#" target="_blank" rel="noopener"
+         style="display:block;background:#16a34a;color:#fff;padding:13px;border-radius:8px;text-align:center;font-weight:700;text-decoration:none;font-size:15px">
+        💬 Hablar ya con un abogado por WhatsApp
+      </a>
+    </div>
 
     <div id="agenda-block">
       <h3 style="margin-top:24px">🗓️ Agenda tu llamada gratuita</h3>
@@ -573,13 +615,20 @@ async function generarPreview(){
   err('err-1','');
   spin('spinner-1', true);
   try{
+    const body = {
+      descripcion: desc,
+      area: document.getElementById('area').value || null,
+      nombre: (document.getElementById('o-nombre')||{}).value || null,
+      cedula: (document.getElementById('o-cedula')||{}).value || null,
+      ciudad: (document.getElementById('o-ciudad')||{}).value || null,
+      accionado: (document.getElementById('o-accionado')||{}).value || null,
+    };
     const r = await fetch('/api/lead/preview',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({descripcion:desc, area:document.getElementById('area').value || null})});
+      body:JSON.stringify(body)});
     const d = await r.json();
     if(!r.ok){throw new Error(d.detail || 'Error generando');}
     currentToken = d.token;
     document.getElementById('preview-visible').textContent = d.preview.visible;
-    document.getElementById('preview-blur-texto').textContent = '\\n\\nFundamentos jurídicos detallados con citas a precedentes específicos de la Corte Suprema...\\n\\nPretensiones precisas adaptadas a tu caso particular...\\n\\nMedida provisional para garantizar tu derecho mientras se decide la tutela...\\n\\nLista de pruebas que debes anexar (historias clínicas, comunicaciones, etc.)...\\n\\nFórmula final con datos de notificación, juramento y anexos...';
     const fichasHtml = d.fichas.map(f=>`<span class="fichas-tag">${f.id} · ${f.sala} ${f.anio}</span>`).join(' ');
     document.getElementById('alert-fichas').innerHTML =
       `<b>📚 Tu simulación se basa en ${d.fichas.length} sentencias reales de la CSJ:</b><br>${fichasHtml}` +
@@ -651,6 +700,13 @@ async function cargarSlots(){
     if(d.lawyer){
       document.getElementById('lawyer-info').innerHTML =
         `<div class="alert alert-gold"><b>👨‍⚖️ Abogado asignado:</b> ${d.lawyer.name}<br><span class="muted">Te llamará por WhatsApp a la hora que elijas.</span></div>`;
+      // Enganchar el botón del upsell con WhatsApp del abogado + mensaje prearmado
+      if(d.lawyer.whatsapp){
+        const msg = encodeURIComponent(
+          `Hola ${d.lawyer.name}, acabo de descargar mi simulación de tutela en Galeano Herrera y me interesa el descuento del 10% para que presenten todo el proceso por mí. ¿Podemos coordinar?`
+        );
+        document.getElementById('upsell-wa').href = `https://wa.me/${d.lawyer.whatsapp}?text=${msg}`;
+      }
     }
     if(!d.slots || !d.slots.length){
       document.getElementById('slots-cont').innerHTML = '<div class="alert alert-info">No hay horarios disponibles los próximos días. El abogado te contactará por WhatsApp para coordinar.</div>';
