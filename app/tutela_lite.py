@@ -132,10 +132,11 @@ def _prompt_publico(descripcion: str, contexto: str, datos_cliente: Optional[dic
     block_tel = f"+{telefono}" if telefono else "[COMPLETAR: teléfono del accionante]"
     block_email = email if email else "[COMPLETAR: correo del accionante]"
 
-    return f"""Eres jurista colombiano experto en acciones de tutela ante la Corte Suprema de Justicia.
-Vas a redactar un BORRADOR de tutela sustancialmente COMPLETO basado en la situación del ciudadano.
+    return f"""Eres jurista colombiano y vas a redactar una SIMULACIÓN MODERADA de acción de tutela.
+Esta simulación es una GUÍA ORIENTATIVA para que un abogado titulado revise, profundice y radique.
+NO es un documento final listo para firma. Deja espacio explícito para que el abogado agregue valor.
 
-DATOS DEL CASO (ÚSALOS LITERALMENTE — NO reemplaces por [COMPLETAR] si tienen valor):
+DATOS DEL CASO (úsalos literales si te los dieron, o marca [COMPLETAR con tu abogado]):
   Accionante: {block_accionante}
   Cédula:     {block_cedula}
   Ciudad:     {ciudad}
@@ -146,12 +147,17 @@ DATOS DEL CASO (ÚSALOS LITERALMENTE — NO reemplaces por [COMPLETAR] si tienen
 
 REGLAS INNEGOCIABLES:
 1. Solo cita radicados que aparezcan EXPRESAMENTE en JURISPRUDENCIA RECUPERADA. NUNCA inventes.
-2. Si un dato NO te fue dado arriba, entonces SÍ usa [COMPLETAR: ...] con indicación clara.
-3. Sé PROLIJO: el borrador debe tener entre 700 y 1100 palabras, listo para revisión por abogado.
-4. Redacta en español formal jurídico colombiano pero comprensible. Tuteo prohibido en el documento.
-5. Entrega solo el documento. Sin comentarios de IA ni meta-explicaciones.
-6. Numera los hechos (al menos 5, hasta 8). Incluye fechas aproximadas según la descripción.
-7. Cita al menos 3 radicados de la jurisprudencia en FUNDAMENTOS JURÍDICOS.
+2. Longitud OBJETIVO: 500 a 750 palabras. No más. Deja profundidad para el abogado.
+3. Numera 4 a 6 hechos basados en la descripción, sin inventar datos.
+4. En FUNDAMENTOS JURÍDICOS: cita 2 a 3 radicados con un párrafo corto por radicado.
+   NO redactes la argumentación completa — termina ese bloque con la nota:
+   "[Su abogado deberá profundizar la argumentación constitucional específica y las subreglas aplicables.]"
+5. En PRETENSIONES: dar la estructura mínima, sin redactar estrategia procesal específica.
+   Terminar con la nota: "[Estrategia procesal y pretensiones alternas: su abogado debe ajustarlas al caso.]"
+6. En MEDIDA PROVISIONAL: mencionarla como procedente cuando aplique, sin redactar la argumentación jurídica.
+   Terminar con la nota: "[La argumentación específica de la medida provisional requiere ajuste por su abogado.]"
+7. Entrega solo el documento. Sin comentarios de IA ni meta-explicaciones.
+8. Redacta en español formal jurídico colombiano, pero accesible.
 
 JURISPRUDENCIA RECUPERADA:
 {contexto}
@@ -161,59 +167,55 @@ SITUACIÓN RELATADA POR EL CIUDADANO:
 
 Genera el BORRADOR con esta estructura exacta (Markdown):
 
-## ACCIÓN DE TUTELA
+## ACCIÓN DE TUTELA — SIMULACIÓN ORIENTATIVA
 
 **Señor Juez Constitucional de {ciudad} (Reparto)**
 **Referencia:** Acción de Tutela de {block_accionante} contra {block_accionado}
 
-{block_accionante}, mayor de edad, identificado con cédula de ciudadanía No. {block_cedula}, domiciliado en {ciudad}, con el debido respeto acudo ante su Despacho para interponer ACCIÓN DE TUTELA contra {block_accionado}, por la vulneración de mis derechos fundamentales, con fundamento en los siguientes:
+{block_accionante}, mayor de edad, identificado con cédula de ciudadanía No. {block_cedula}, domiciliado en {ciudad}, respetuosamente comparezco ante su Despacho para interponer ACCIÓN DE TUTELA contra {block_accionado}, por la vulneración de mis derechos fundamentales, con fundamento en los siguientes:
 
 ### I. HECHOS
-1. (redacta cronológico, basado en la descripción del ciudadano)
-2. ...
-(5 a 8 hechos numerados, cada uno una oración clara)
+(Numera 4 a 6 hechos claros, basados en la descripción.)
 
 ### II. DERECHOS FUNDAMENTALES VULNERADOS
-Lista los derechos concretos vulnerados (salud, mínimo vital, debido proceso, etc.).
+Lista breve (máximo 3-4 derechos concretos).
 
-### III. FUNDAMENTOS DE DERECHO
-Redacta 3-4 párrafos densos citando los radicados de la jurisprudencia recuperada entre paréntesis, ej: "(STC1234-2023)". Explica cómo cada precedente aplica al caso.
+### III. FUNDAMENTOS JURÍDICOS (base, requiere profundización)
+Cita 2 a 3 radicados con un párrafo breve por radicado explicando su relevancia para el caso.
+
+> **[Su abogado deberá profundizar la argumentación constitucional específica y las subreglas aplicables a este caso concreto.]**
 
 ### IV. PROCEDENCIA DE LA ACCIÓN
-Justifica brevemente:
-- **Legitimación activa** del accionante.
-- **Legitimación pasiva** del accionado.
-- **Inmediatez** (cuándo ocurrió el hecho).
-- **Subsidiariedad** (por qué la tutela es la vía idónea).
+Valida brevemente en 4 bullets: legitimación activa, legitimación pasiva, inmediatez, subsidiariedad.
 
-### V. PRETENSIONES
-Numeradas. Sé específico y ejecutable. Incluye siempre:
+### V. PRETENSIONES (estructura base)
 1. Amparar los derechos fundamentales vulnerados.
-2. Ordenar a {block_accionado} realizar la acción específica que se pide.
-3. (Cuando aplique) solicitar MEDIDA PROVISIONAL URGENTE por riesgo inminente.
-4. Imponer costas y sanciones por desacato si incumple.
+2. Ordenar a {block_accionado} la acción específica solicitada.
+3. Cuando aplique, conceder medida provisional urgente.
+
+> **[Estrategia procesal y pretensiones alternas: su abogado debe ajustarlas al caso.]**
 
 ### VI. MEDIDA PROVISIONAL
-Si el caso lo exige (salud, mínimo vital), redacta el párrafo de solicitud de medida provisional citando jurisprudencia.
+Mención de procedencia si hay riesgo inminente.
 
-### VII. PRUEBAS
-Lista de documentos que debe anexar el accionante (historia clínica, comunicaciones, reclamaciones previas, órdenes médicas, etc. — según el caso).
+> **[La argumentación específica de la medida provisional requiere ajuste por su abogado.]**
+
+### VII. PRUEBAS SUGERIDAS
+Lista de documentos típicos del caso. El abogado debe validar cuáles aplican.
 
 ### VIII. JURAMENTO
 Declaro bajo la gravedad del juramento que no he presentado otra acción de tutela por los mismos hechos.
 
 ### IX. NOTIFICACIONES
-- **Accionante:** {block_accionante}, C.C. {block_cedula}. Tel: {block_tel}. Correo: {block_email}. Dirección: [COMPLETAR: dirección física].
-- **Accionado:** {block_accionado}. [COMPLETAR: dirección de notificación].
-- **Despacho de apoderado (opcional):** Galeano Herrera | Abogados — contacto@galeanoherrera.co.
+- Accionante: {block_accionante}, C.C. {block_cedula}. Tel: {block_tel}. Correo: {block_email}. Dirección: [COMPLETAR].
+- Accionado: {block_accionado}. [COMPLETAR: dirección].
+- **Apoderado (sugerido):** Galeano Herrera | Abogados — contacto@galeanoherrera.co
 
 ### X. ANEXOS
 1. Copia de la cédula del accionante.
-2. (Demás pruebas documentales listadas en VI.)
+2. Demás pruebas documentales.
 
 {ciudad}, {fecha}
-
-Atentamente,
 
 _______________________________
 {block_accionante}
@@ -221,8 +223,10 @@ C.C. {block_cedula}
 
 ---
 
-**Fuentes jurisprudenciales citadas en este borrador:**
+**Fuentes jurisprudenciales citadas (verifica cada una en relatoria.cortesuprema.gov.co):**
 (lista cada radicado en bullet)
+
+**⚠ IMPORTANTE:** Esta simulación es orientativa. Un abogado titulado debe revisarla, profundizar la argumentación y ajustar la estrategia procesal antes de radicar.
 """
 
 
@@ -357,6 +361,66 @@ def construir_preview(draft: str, palabras_visibles: int = 260) -> dict:
 
 # ── Render a DOCX (sin dependencias pesadas, fallback a TXT) ─────────────────
 
+def _add_watermark(doc, text: str = "BORRADOR — SIMULACIÓN") -> None:
+    """Inserta marca de agua diagonal gris claro en el header de cada página."""
+    try:
+        from docx.oxml.ns import qn
+        from lxml import etree
+    except Exception:
+        return
+    for section in doc.sections:
+        header = section.header
+        p = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+        r = p.add_run()
+        # Escape XML special chars in text
+        safe = (text or "").replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace('"',"&quot;")
+        wm_xml = (
+            '<w:pict xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+            'xmlns:v="urn:schemas-microsoft-com:vml" '
+            'xmlns:o="urn:schemas-microsoft-com:office:office">'
+            '<v:shapetype id="_x0000_t136" coordsize="21600,21600" o:spt="136" adj="10800" '
+            'path="m@7,l@8,m@5,21600l@6,21600e">'
+            '<v:formulas>'
+            '<v:f eqn="sum #0 0 10800"/><v:f eqn="prod #0 2 1"/><v:f eqn="sum 21600 0 @1"/>'
+            '<v:f eqn="sum 0 0 @2"/><v:f eqn="sum 21600 0 @3"/><v:f eqn="if @0 @3 0"/>'
+            '<v:f eqn="if @0 21600 @1"/><v:f eqn="if @0 0 @2"/><v:f eqn="if @0 @4 21600"/>'
+            '<v:f eqn="mid @5 @6"/><v:f eqn="mid @8 @5"/><v:f eqn="mid @7 @8"/>'
+            '<v:f eqn="mid @6 @7"/><v:f eqn="sum @6 0 @5"/>'
+            '</v:formulas>'
+            '<v:path o:extrusionok="f" gradientshapeok="t" o:connecttype="custom" '
+            'o:connectlocs="@9,0;@10,10800;@11,21600;@12,10800" '
+            'o:connectangles="270,180,90,0" textpathok="t"/>'
+            '<v:textpath on="t" fitshape="t"/>'
+            '</v:shapetype>'
+            '<v:shape id="WM" type="#_x0000_t136" '
+            'style="position:absolute;margin-left:0;margin-top:0;width:580pt;height:95pt;'
+            'z-index:-251648512;mso-position-horizontal:center;mso-position-horizontal-relative:margin;'
+            'mso-position-vertical:center;mso-position-vertical-relative:margin;rotation:-40" '
+            'fillcolor="#d1d5db" stroked="f">'
+            '<v:fill opacity=".55"/>'
+            f'<v:textpath style="font-family:&quot;Calibri&quot;;font-size:1pt;font-weight:bold" string="{safe}"/>'
+            '</v:shape>'
+            '</w:pict>'
+        )
+        try:
+            r._r.append(etree.fromstring(wm_xml))
+        except Exception:
+            pass
+
+
+def _add_header_footer(doc) -> None:
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    for section in doc.sections:
+        # Footer marca
+        ftr = section.footer
+        fp = ftr.paragraphs[0] if ftr.paragraphs else ftr.add_paragraph()
+        fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        fr = fp.add_run("Galeano Herrera | Abogados — contacto@galeanoherrera.co · "
+                        "Simulación orientativa · No presentar sin revisión profesional")
+        fr.font.size = Pt(8); fr.font.color.rgb = RGBColor(0x6b, 0x72, 0x80)
+
+
 def borrador_a_docx(draft: str, nombre_cliente: str = "") -> bytes:
     try:
         from docx import Document
@@ -367,13 +431,15 @@ def borrador_a_docx(draft: str, nombre_cliente: str = "") -> bytes:
 
     d = Document()
     section = d.sections[0]
-    for m in (section.top_margin, section.bottom_margin, section.left_margin, section.right_margin):
-        pass
     section.top_margin = Cm(2.5); section.bottom_margin = Cm(2.5)
     section.left_margin = Cm(2.5); section.right_margin = Cm(2.5)
 
     style = d.styles["Normal"]
     style.font.name = "Calibri"; style.font.size = Pt(11)
+
+    # Header + footer + watermark
+    _add_watermark(d, "SIMULACIÓN — GALEANO HERRERA")
+    _add_header_footer(d)
 
     # Encabezado de marca
     h = d.add_paragraph()
@@ -382,7 +448,27 @@ def borrador_a_docx(draft: str, nombre_cliente: str = "") -> bytes:
     run.bold = True; run.font.size = Pt(14); run.font.color.rgb = RGBColor(0x00, 0x23, 0x47)
     sub = d.add_paragraph()
     sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    sub.add_run("Borrador de Acción de Tutela — Documento orientativo").italic = True
+    sub.add_run("Simulación de Acción de Tutela — Documento orientativo").italic = True
+
+    # Disclaimer box ROJO llamativo al inicio
+    box = d.add_paragraph()
+    box.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    br = box.add_run("⚠ ESTE DOCUMENTO ES UNA SIMULACIÓN ORIENTATIVA.\n"
+                     "NO CONSTITUYE ASESORÍA JURÍDICA. "
+                     "DEBE SER REVISADO Y AJUSTADO POR UN ABOGADO TITULADO ANTES DE RADICARLO.")
+    br.bold = True; br.font.size = Pt(10); br.font.color.rgb = RGBColor(0xc8, 0x10, 0x2e)
+    # borde en cajón del párrafo
+    pPr = box._p.get_or_add_pPr()
+    from docx.oxml.ns import qn as _qn
+    from lxml import etree as _et
+    pbdr_xml = ('<w:pBdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                '<w:top w:val="single" w:sz="12" w:space="6" w:color="C8102E"/>'
+                '<w:left w:val="single" w:sz="12" w:space="6" w:color="C8102E"/>'
+                '<w:bottom w:val="single" w:sz="12" w:space="6" w:color="C8102E"/>'
+                '<w:right w:val="single" w:sz="12" w:space="6" w:color="C8102E"/>'
+                '</w:pBdr>')
+    try: pPr.append(_et.fromstring(pbdr_xml))
+    except Exception: pass
     d.add_paragraph()
 
     for raw_line in draft.splitlines():
@@ -395,8 +481,13 @@ def borrador_a_docx(draft: str, nombre_cliente: str = "") -> bytes:
         elif line.startswith("### "):
             p = d.add_paragraph(); r = p.add_run(line[4:].strip())
             r.bold = True; r.font.size = Pt(12)
-        elif line.startswith("**") and line.endswith("**"):
+        elif line.startswith("**") and line.endswith("**") and len(line) < 200:
             p = d.add_paragraph(); p.add_run(line.strip("*")).bold = True
+        elif line.startswith("> "):
+            # blockquote resaltado (las notas "su abogado deberá...")
+            p = d.add_paragraph()
+            rr = p.add_run(line[2:].strip("* "))
+            rr.italic = True; rr.font.color.rgb = RGBColor(0xC5, 0xA0, 0x59)
         elif line.startswith("- ") or line.startswith("* "):
             d.add_paragraph(line[2:], style="List Bullet")
         elif re.match(r"^\d+\. ", line):

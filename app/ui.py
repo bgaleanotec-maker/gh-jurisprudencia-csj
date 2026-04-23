@@ -185,6 +185,30 @@ def landing_html() -> str:
   .modal h3{margin-bottom:14px;}
   .modal-close{float:right;cursor:pointer;color:#888;font-size:24px;line-height:1;}
 
+  /* WIZARD */
+  .wiz-progress{margin-bottom:22px;}
+  .wiz-track{background:#e5e7eb;height:6px;border-radius:3px;overflow:hidden;margin-bottom:12px;}
+  .wiz-fill{background:linear-gradient(90deg,var(--azul) 0%,var(--verde) 100%);height:100%;transition:width .35s;}
+  .wiz-steps{display:flex;justify-content:space-between;gap:6px;font-size:10px;color:#9ca3af;font-weight:700;text-transform:uppercase;letter-spacing:.5px;flex-wrap:wrap;}
+  .wiz-dot{flex:1;text-align:center;padding:4px 2px;}
+  .wiz-dot.on{color:var(--azul);}
+  .wiz-panel{display:none;animation:fadeIn .3s;}
+  .wiz-panel.on{display:block;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+  .wiz-nav{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:22px;}
+  .wiz-nav .btn{flex:1;max-width:260px;margin-left:auto;}
+  .btn-ghost{background:transparent;color:var(--azul);border:1px solid #dce3ef;padding:12px 22px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;}
+  .btn-ghost:hover{background:var(--gris);}
+  /* Tipo cards */
+  .tipo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:8px;}
+  @media(max-width:680px){.tipo-grid{grid-template-columns:repeat(2,1fr);}}
+  .tipo-card{background:#fff;border:2px solid #e5e7eb;border-radius:10px;padding:16px 10px;cursor:pointer;text-align:center;transition:all .15s;}
+  .tipo-card:hover{border-color:var(--oro);transform:translateY(-2px);box-shadow:0 6px 16px rgba(197,160,89,.15);}
+  .tipo-card.sel{border-color:var(--verde);background:#dcfce7;}
+  .tipo-card .ic{font-size:32px;margin-bottom:6px;display:block;}
+  .tipo-card .tt{font-weight:700;color:var(--azul);font-size:13px;margin-bottom:4px;}
+  .tipo-card .ds{font-size:11px;color:#6b7280;line-height:1.4;}
+
   /* CTA STICKY MOBILE */
   .cta-sticky{display:none;position:fixed;bottom:0;left:0;right:0;background:#fff;padding:12px 16px;border-top:2px solid var(--oro);box-shadow:0 -4px 20px rgba(0,0,0,.08);z-index:50;}
   @media(max-width:780px){.cta-sticky.show{display:flex;gap:10px;align-items:center;justify-content:center;}}
@@ -253,57 +277,121 @@ def landing_html() -> str:
     <div class="paso"><div class="num">4</div><div class="t">Actúa</div><div class="d">Con confianza</div></div>
   </div>
 
-  <!-- STEP 1: DESCRIBIR -->
+  <!-- STEP 1: WIZARD CARRUSEL (5 micro-pasos) -->
   <div class="card step on" id="step-1">
-    <div class="nav-step">Paso 1 de 5</div>
-    <h2>Cuéntame qué está pasando</h2>
-    <p class="muted" style="margin-bottom:20px">Escribe como le contarías a un amigo: qué pasó, contra quién, desde cuándo. Mientras más datos completes, menos <i>[COMPLETAR]</i> tendrá tu borrador.</p>
 
-    <div class="form-group">
-      <label>Tu caso *</label>
-      <textarea id="descripcion" autofocus placeholder="Por ejemplo: Mi EPS Sanitas me niega desde hace dos meses la cirugía de rodilla que ordenó el ortopedista. Ya radiqué reclamación el 15 de marzo y no responden. No puedo caminar sin dolor..."></textarea>
+    <!-- Progress bar del wizard -->
+    <div class="wiz-progress">
+      <div class="wiz-track"><div id="wiz-bar" class="wiz-fill" style="width:20%"></div></div>
+      <div class="wiz-steps">
+        <span class="wiz-dot on" data-s="1">1. Tipo</span>
+        <span class="wiz-dot" data-s="2">2. Contra quién</span>
+        <span class="wiz-dot" data-s="3">3. Cuándo</span>
+        <span class="wiz-dot" data-s="4">4. Detalles</span>
+        <span class="wiz-dot" data-s="5">5. Tú</span>
+      </div>
     </div>
 
-    <details style="margin:14px 0;background:#f6f8fb;border-radius:8px;padding:14px">
-      <summary style="cursor:pointer;font-weight:700;color:var(--azul);font-size:14px;list-style:none">✍️ Datos para que el borrador salga más listo (opcional · 30 s)</summary>
-      <p class="muted" style="margin:10px 0 14px;font-size:13px">Los usamos para rellenar el documento. Si no los llenas, salen como <i>[COMPLETAR]</i>.</p>
+    <!-- Micro-paso 1.1: Tipo de caso -->
+    <div class="wiz-panel on" id="wiz-1">
+      <h2>¿Qué te está pasando?</h2>
+      <p class="muted" style="margin-bottom:16px">Elige la opción más cercana a tu situación.</p>
+      <div class="tipo-grid" id="tipo-grid">
+        <div class="tipo-card" data-area="salud"><div class="ic">🏥</div><div class="tt">Salud · EPS</div><div class="ds">Me niegan medicamentos, cirugía, tratamiento</div></div>
+        <div class="tipo-card" data-area="pensiones"><div class="ic">👴</div><div class="tt">Pensiones · Colpensiones</div><div class="ds">Mora, negación de pensión, AFP</div></div>
+        <div class="tipo-card" data-area="laboral"><div class="ic">💼</div><div class="tt">Laboral · Despido</div><div class="ds">Fuero, embarazo, salud, acoso</div></div>
+        <div class="tipo-card" data-area="accidentes"><div class="ic">🚗</div><div class="tt">Accidente · SOAT</div><div class="ds">Seguradora no paga atención</div></div>
+        <div class="tipo-card" data-area="insolvencia"><div class="ic">💳</div><div class="tt">Embargo · Insolvencia</div><div class="ds">Cuenta nómina, bienes, deudas</div></div>
+        <div class="tipo-card" data-area="derechos_fundamentales"><div class="ic">⚖️</div><div class="tt">Otros derechos</div><div class="ds">Debido proceso, mora judicial, libertad</div></div>
+      </div>
+      <div class="wiz-nav">
+        <div></div>
+        <button class="btn" id="wiz-next-1" disabled onclick="wizNext(1)">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- Micro-paso 1.2: Contra quién -->
+    <div class="wiz-panel" id="wiz-2">
+      <h2>¿Contra quién es?</h2>
+      <p class="muted" style="margin-bottom:16px" id="wiz-2-hint">Escribe el nombre completo de la entidad.</p>
+      <div class="form-group">
+        <label>Entidad, empresa o persona accionada</label>
+        <input type="text" id="o-accionado" placeholder="Ej: EPS Sanitas S.A.S.">
+      </div>
+      <div class="wiz-nav">
+        <button class="btn-ghost" onclick="wizPrev(2)">← Volver</button>
+        <button class="btn" onclick="wizNext(2)">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- Micro-paso 1.3: Cuándo -->
+    <div class="wiz-panel" id="wiz-3">
+      <h2>¿Desde cuándo ocurrió?</h2>
+      <p class="muted" style="margin-bottom:16px">La inmediatez importa: si pasó hace menos de 6 meses, tu tutela tiene mejor chance.</p>
+      <div class="row">
+        <div class="form-group">
+          <label>Fecha aproximada del hecho</label>
+          <input type="date" id="o-fecha">
+        </div>
+        <div class="form-group">
+          <label>¿Ya reclamaste a la entidad?</label>
+          <select id="o-reclamo">
+            <option value="">Selecciona</option>
+            <option value="si_sin_respuesta">Sí, no respondieron</option>
+            <option value="si_negado">Sí, me lo negaron</option>
+            <option value="no">No, aún no</option>
+          </select>
+        </div>
+      </div>
+      <div class="wiz-nav">
+        <button class="btn-ghost" onclick="wizPrev(3)">← Volver</button>
+        <button class="btn" onclick="wizNext(3)">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- Micro-paso 1.4: Detalles libres -->
+    <div class="wiz-panel" id="wiz-4">
+      <h2>Cuéntanos más detalle</h2>
+      <p class="muted" style="margin-bottom:16px">Tres frases basta. ¿Qué te prescribieron? ¿Qué síntomas/consecuencias tienes? ¿Qué pruebas tienes?</p>
+      <div class="form-group">
+        <label>Tu historia *</label>
+        <textarea id="descripcion" autofocus placeholder="Por ejemplo: Mi oncólogo ordenó quimioterapia el 10 de enero. La EPS dice que el medicamento no está en el POS. Tengo la orden médica y un concepto que dice que sin tratamiento hay riesgo vital..."></textarea>
+      </div>
+      <div class="wiz-nav">
+        <button class="btn-ghost" onclick="wizPrev(4)">← Volver</button>
+        <button class="btn" onclick="wizNext(4)">Siguiente →</button>
+      </div>
+    </div>
+
+    <!-- Micro-paso 1.5: Datos personales -->
+    <div class="wiz-panel" id="wiz-5">
+      <h2>Tus datos (para personalizar el borrador)</h2>
+      <p class="muted" style="margin-bottom:16px">Si los llenas, el documento sale con tu nombre real en vez de <i>[COMPLETAR]</i>.</p>
       <div class="row">
         <div class="form-group">
           <label>Tu nombre completo</label>
-          <input type="text" id="o-nombre" placeholder="María García López">
+          <input type="text" id="o-nombre" placeholder="María García López" autocomplete="name">
         </div>
         <div class="form-group">
           <label>Tu cédula</label>
-          <input type="text" id="o-cedula" inputmode="numeric" placeholder="1.234.567.890">
+          <input type="text" id="o-cedula" inputmode="numeric" placeholder="1234567890">
         </div>
       </div>
-      <div class="row">
-        <div class="form-group">
-          <label>Ciudad</label>
-          <input type="text" id="o-ciudad" placeholder="Bogotá D.C." value="Bogotá D.C.">
-        </div>
-        <div class="form-group">
-          <label>Contra quién (entidad/empresa)</label>
-          <input type="text" id="o-accionado" placeholder="EPS Sanitas S.A.S.">
-        </div>
+      <div class="form-group">
+        <label>Ciudad</label>
+        <input type="text" id="o-ciudad" placeholder="Bogotá D.C." value="Bogotá D.C.">
       </div>
-    </details>
-
-    <div class="form-group">
-      <label>Tipo de caso</label>
-      <select id="area">
-        <option value="">Lo detectamos por ti</option>
-        <option value="salud">Salud · EPS</option>
-        <option value="pensiones">Pensiones · Colpensiones</option>
-        <option value="laboral">Laboral · Despido o fuero</option>
-        <option value="accidentes">Accidente de tránsito · SOAT</option>
-        <option value="insolvencia">Insolvencia · Embargos</option>
-        <option value="derechos_fundamentales">Otros derechos</option>
-      </select>
+      <div class="wiz-nav">
+        <button class="btn-ghost" onclick="wizPrev(5)">← Volver</button>
+        <button class="btn" onclick="generarPreview()">Analizar mi caso ⚡</button>
+      </div>
     </div>
-    <button class="btn" onclick="generarPreview()">Conocer mi caso</button>
+
     <div class="spinner" id="spinner-1"><div class="dot"></div><div class="dot"></div><div class="dot"></div><br><br>Analizando contra jurisprudencia de la Corte Suprema…</div>
     <div id="err-1"></div>
+
+    <!-- input oculto para compatibilidad -->
+    <input type="hidden" id="area" value="">
   </div>
 
   <!-- STEP 2: PREVIEW -->
@@ -607,14 +695,67 @@ window.addEventListener('scroll',()=>{
   document.getElementById('cta-sticky').classList.toggle('show', window.scrollY > 600);
 });
 
+// ─── Wizard carrusel ─────────────────────────────────────────
+let wizStep = 1;
+const WIZ_HINTS = {
+  salud:      {acc:'Ej: EPS Sanitas, Sura, Compensar, Salud Total…', lbl:'Tu EPS o IPS'},
+  pensiones:  {acc:'Ej: Colpensiones, Porvenir, Protección, Old Mutual…', lbl:'Administradora de pensiones'},
+  laboral:    {acc:'Ej: nombre exacto de la empresa o empleador', lbl:'Empresa / empleador'},
+  accidentes: {acc:'Ej: Previsora, Seguros Bolívar, Sura SOAT…', lbl:'Aseguradora SOAT'},
+  insolvencia:{acc:'Ej: Banco Bogotá, Davivienda, Bancolombia…', lbl:'Entidad que embarga'},
+  derechos_fundamentales:{acc:'Ej: DIAN, Juzgado X, Alcaldía…', lbl:'Entidad accionada'},
+};
+
+// Selección de tipo (paso 1.1)
+document.querySelectorAll('.tipo-card').forEach(c=>c.addEventListener('click',()=>{
+  document.querySelectorAll('.tipo-card').forEach(x=>x.classList.remove('sel'));
+  c.classList.add('sel');
+  const area = c.dataset.area;
+  document.getElementById('area').value = area;
+  document.getElementById('wiz-next-1').disabled = false;
+  // Ajustar hint del paso 2
+  const h = WIZ_HINTS[area] || {acc:'', lbl:'Entidad accionada'};
+  const lbl = document.querySelector('#wiz-2 label'); if(lbl) lbl.textContent = h.lbl;
+  const inp = document.getElementById('o-accionado'); if(inp) inp.placeholder = h.acc;
+}));
+
+function wizShow(n){
+  wizStep = n;
+  document.querySelectorAll('.wiz-panel').forEach(p=>p.classList.remove('on'));
+  document.getElementById('wiz-'+n).classList.add('on');
+  document.querySelectorAll('.wiz-dot').forEach(d=>{
+    d.classList.toggle('on', parseInt(d.dataset.s) <= n);
+  });
+  document.getElementById('wiz-bar').style.width = (n*20) + '%';
+  // Scroll al top del card
+  document.getElementById('step-1').scrollIntoView({behavior:'smooth',block:'start'});
+}
+function wizNext(from){
+  if(from===4){
+    const desc = document.getElementById('descripcion').value.trim();
+    if(desc.length < 30){err('err-1','Escribe al menos una historia de 3 frases (mínimo 30 caracteres).');return;}
+  }
+  wizShow(from+1);
+}
+function wizPrev(from){ wizShow(from-1); }
+
 async function generarPreview(){
   const desc = document.getElementById('descripcion').value.trim();
-  if(desc.length < 30){err('err-1','Cuéntanos más detalle (mínimo 30 caracteres). ¿Qué pasó, contra quién y desde cuándo?');return;}
+  if(desc.length < 30){err('err-1','Cuéntanos más detalle (mínimo 30 caracteres). ¿Qué pasó, contra quién y desde cuándo?');wizShow(4);return;}
   err('err-1','');
   spin('spinner-1', true);
   try{
+    // Componer descripción enriquecida (fecha + reclamo previo si los dio)
+    let descFinal = desc;
+    const fecha = (document.getElementById('o-fecha')||{}).value;
+    const recl = (document.getElementById('o-reclamo')||{}).value;
+    if(fecha){ descFinal = `Fecha del hecho: ${fecha}. ` + descFinal; }
+    if(recl === 'si_sin_respuesta') descFinal += ' He radicado reclamación ante la entidad sin recibir respuesta.';
+    else if(recl === 'si_negado') descFinal += ' Reclamé y la entidad me negó lo solicitado.';
+    else if(recl === 'no') descFinal += ' Aún no he radicado reclamación formal.';
+
     const body = {
-      descripcion: desc,
+      descripcion: descFinal,
       area: document.getElementById('area').value || null,
       nombre: (document.getElementById('o-nombre')||{}).value || null,
       cedula: (document.getElementById('o-cedula')||{}).value || null,
@@ -1158,6 +1299,7 @@ async function loadLeads(){
       <td><div class="truncate">${(l.descripcion||'').slice(0,140)}</div></td>
       <td><span class="badge ${l.status}">${l.status}</span></td>
       <td><div class="actions">
+        <a class="btn btn-sm green" href="/pro/lead/${l.id}" target="_blank">🧠 Trabajar caso</a>
         <button class="btn btn-sm outline" onclick="verLead(${l.id})">Ver</button>
         ${l.status==='verified'?`<button class="btn btn-sm green" onclick="setStatus(${l.id},'contacted')">Contactado</button>`:''}
         ${(l.status==='contacted'||l.status==='verified')?`<button class="btn btn-sm gold" onclick="setStatus(${l.id},'closed')">Cerrar</button>`:''}
@@ -1370,6 +1512,316 @@ setInterval(loadStats, 60000);
 
 
 # =============================================================================
+# LAWYER WORKSPACE (por-lead)
+# =============================================================================
+
+def lawyer_workspace_html(lawyer: dict, lead: dict) -> str:
+    import json as _json
+    lead_json = _json.dumps({k: lead.get(k) for k in
+        ("id","name","cedula","phone","email","area","descripcion","draft","status","created_at")})
+    def esc(s): return (s or "").replace("<","&lt;").replace(">","&gt;")
+    phone = lead.get("phone") or ""
+    area = lead.get("area") or ""
+    fichas = lead.get("fichas") or []
+    fichas_html = " ".join(f'<span class="badge-fch">{esc(f.get("id",""))} · {esc(f.get("sala","") or "")} {esc(str(f.get("anio","")))}</span>' for f in fichas)
+    return """<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caso · """ + esc(lead.get("name") or "Lead") + """ · Galeano Herrera</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',sans-serif;}
+  body{background:#f4f6f9;color:#1a2332;}
+  header{background:#002347;color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #C5A059;}
+  header h1{font-size:17px;}
+  header a{color:#C5A059;text-decoration:none;font-size:13px;margin-left:14px;}
+  .container{max-width:1400px;margin:0 auto;padding:20px;}
+
+  .case-head{background:#fff;padding:20px 24px;border-radius:10px;box-shadow:0 1px 6px rgba(0,35,71,.08);margin-bottom:18px;}
+  .case-head .title{color:#002347;font-size:22px;font-weight:800;margin-bottom:6px;}
+  .case-head .meta{font-size:13px;color:#6b7280;margin-bottom:12px;}
+  .case-head .badges{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
+  .case-head .badges span{font-size:11px;font-weight:700;padding:4px 10px;border-radius:12px;background:#e3f0ff;color:#004a9f;}
+  .case-head .badges .status{background:#dcfce7;color:#166534;}
+  .quick-actions{display:flex;gap:10px;flex-wrap:wrap;}
+  .btn{background:#002347;color:#fff;padding:9px 16px;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;text-decoration:none;display:inline-block;}
+  .btn:hover{background:#003f7a;}
+  .btn.green{background:#16a34a;}.btn.green:hover{background:#15803d;}
+  .btn.gold{background:#C5A059;}.btn.gold:hover{background:#b08a47;}
+  .btn.outline{background:transparent;color:#002347;border:1px solid #002347;}
+  .btn.danger{background:#c8102e;}
+  .btn-sm{padding:6px 12px;font-size:12px;}
+
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media(max-width:980px){.grid{grid-template-columns:1fr;}}
+
+  .col{display:flex;flex-direction:column;gap:14px;}
+  .card{background:#fff;padding:18px;border-radius:10px;box-shadow:0 1px 6px rgba(0,35,71,.08);}
+  .card h3{color:#002347;font-size:15px;margin-bottom:12px;font-weight:700;display:flex;align-items:center;gap:8px;}
+  .card h3 .tag{font-size:10px;background:#C5A059;color:#fff;padding:2px 7px;border-radius:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+  .card .sub{font-size:12px;color:#6b7280;margin-bottom:10px;}
+
+  label{font-size:11px;font-weight:700;color:#002347;text-transform:uppercase;display:block;margin-bottom:4px;letter-spacing:.5px;}
+  input,select,textarea{width:100%;padding:9px 11px;border:1px solid #dce3ef;border-radius:6px;font-size:13px;font-family:inherit;}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:#002347;}
+  textarea{resize:vertical;min-height:90px;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+  .cliente-desc{background:#f6f8fb;padding:12px;border-left:3px solid #C5A059;border-radius:0 6px 6px 0;font-size:13px;line-height:1.6;white-space:pre-wrap;max-height:200px;overflow-y:auto;}
+  .badge-fch{display:inline-block;background:#e3f0ff;color:#004a9f;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700;margin:2px;}
+
+  .tool-btn{background:#fff;border:1px solid #dce3ef;border-radius:8px;padding:12px;cursor:pointer;text-align:left;transition:all .15s;width:100%;margin-bottom:8px;display:flex;align-items:center;gap:10px;}
+  .tool-btn:hover{border-color:#C5A059;transform:translateX(2px);}
+  .tool-btn .ic{font-size:22px;}
+  .tool-btn .t{font-weight:700;color:#002347;font-size:13px;}
+  .tool-btn .d{font-size:11px;color:#6b7280;margin-top:2px;}
+
+  .result-box{background:#fafbfc;border:1px solid #e5e7eb;border-radius:8px;padding:14px;max-height:600px;overflow-y:auto;font-family:'Georgia',serif;font-size:13px;line-height:1.7;white-space:pre-wrap;display:none;}
+  .result-box.on{display:block;}
+  .result-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+
+  .spinner{display:none;text-align:center;padding:14px;color:#002347;font-size:13px;}
+  .spinner.on{display:block;}
+  .spinner .dot{display:inline-block;width:8px;height:8px;background:#C5A059;border-radius:50%;margin:0 3px;animation:bounce 1.2s infinite;}
+  .spinner .dot:nth-child(2){animation-delay:.2s;}.spinner .dot:nth-child(3){animation-delay:.4s;}
+  @keyframes bounce{0%,80%,100%{transform:scale(.6);opacity:.4;}40%{transform:scale(1);opacity:1;}}
+
+  .toast{position:fixed;bottom:20px;right:20px;background:#16a34a;color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:100;display:none;}
+  .toast.on{display:block;animation:slideIn .3s;}
+  @keyframes slideIn{from{transform:translateX(100%);}to{transform:none;}}
+</style></head><body>
+
+<header>
+  <h1>⚖ Caso · """ + esc(lead.get("name") or "Sin registrar") + """</h1>
+  <div><a href="/pro">← Dashboard</a><a href="/pro/logout">Salir</a></div>
+</header>
+
+<div class="container">
+
+  <!-- Case head -->
+  <div class="case-head">
+    <div class="title">""" + esc(lead.get("name") or "Cliente sin registrar") + """</div>
+    <div class="meta">
+      CC """ + esc(lead.get("cedula") or "—") + """ · Tel <a href="https://wa.me/""" + esc(phone) + """" target="_blank">+""" + esc(phone) + """</a> · """ + esc(lead.get("email") or "—") + """
+      · Creado """ + esc((lead.get("created_at") or "")[:16]) + """
+    </div>
+    <div class="badges">
+      <span class="status">""" + esc(lead.get("status") or "") + """</span>
+      <span>""" + esc(area or "sin área") + """</span>
+    </div>
+    <div class="quick-actions">
+      <a class="btn green" href="https://wa.me/""" + esc(phone) + """" target="_blank">💬 WhatsApp</a>
+      <button class="btn gold" onclick="setStatus('contacted')">Marcar contactado</button>
+      <button class="btn" onclick="setStatus('closed')">Cerrar caso</button>
+      <a class="btn outline" href="/api/lead/download/""" + esc(lead.get("token","")) + """.docx" target="_blank">📥 Descargar borrador actual</a>
+    </div>
+  </div>
+
+  <!-- 2 columnas: Izquierda = caso cliente · Derecha = asistente IA -->
+  <div class="grid">
+    <div class="col">
+
+      <div class="card">
+        <h3>📝 Caso del cliente <span class="tag">Original</span></h3>
+        <div class="sub">Lo que el cliente escribió en la landing:</div>
+        <div class="cliente-desc">""" + esc(lead.get("descripcion") or "") + """</div>
+        <div style="margin-top:10px;font-size:11px;color:#6b7280">📚 Fichas base: """ + fichas_html + """</div>
+      </div>
+
+      <div class="card">
+        <h3>✍️ Complementa el caso <span class="tag">Opcional</span></h3>
+        <div class="sub">Datos que tú tienes y el cliente no puso. Se usan en las herramientas IA de la derecha.</div>
+        <div class="row2">
+          <div><label>Accionado (exacto)</label><input id="c-accionado" placeholder="EPS Sanitas S.A.S. NIT…"></div>
+          <div><label>Derecho vulnerado</label><input id="c-derecho" placeholder="Salud y vida digna"></div>
+        </div>
+        <div style="margin-top:8px"><label>Hechos ampliados (si tienes más info del cliente por WhatsApp)</label>
+          <textarea id="c-hechos" placeholder="Ej: Cliente confirmó por WhatsApp que tiene concepto médico del 15 de abril. Historia clínica adjunta. PQR radicada el 20 de marzo sin respuesta."></textarea>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>📄 Borrador final <span class="tag">Para radicar</span></h3>
+        <div class="sub">Pega aquí el resultado que trabajes con las herramientas y guarda. Esta versión reemplaza la simulación original y queda disponible para descargar.</div>
+        <textarea id="draft-final" style="min-height:260px;font-family:'Georgia',serif;font-size:13px" placeholder="El borrador final irá aquí…">""" + esc(lead.get("draft") or "") + """</textarea>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn green" onclick="guardarBorrador()">💾 Guardar borrador final</button>
+          <a class="btn outline" href="/api/lead/download/""" + esc(lead.get("token","")) + """.docx" target="_blank">📥 Descargar DOCX</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <h3>🧠 Asistente IA <span class="tag">RAG · 625 fichas CSJ</span></h3>
+        <div class="sub">Todas las herramientas usan los datos del cliente + lo que complementes a la izquierda.</div>
+
+        <button class="tool-btn" onclick="runTool('caso')">
+          <span class="ic">📋</span>
+          <div><div class="t">Análisis completo del caso</div><div class="d">Protocolo Galeano: diagnóstico + estrategia + probabilidad de éxito</div></div>
+        </button>
+        <button class="tool-btn" onclick="runTool('tutela')">
+          <span class="ic">⚖</span>
+          <div><div class="t">Generar tutela FINAL (completa)</div><div class="d">Versión lista para radicar. Sin tope de palabras. Cita radicados.</div></div>
+        </button>
+        <button class="tool-btn" onclick="runTool('linea')">
+          <span class="ic">📈</span>
+          <div><div class="t">Línea jurisprudencial del área</div><div class="d">Tesis dominante + evolución + cuándo NO concede la Corte</div></div>
+        </button>
+        <button class="tool-btn" onclick="runTool('consultar')">
+          <span class="ic">🔍</span>
+          <div><div class="t">Consulta libre (tu pregunta)</div><div class="d">Para dudas específicas que no caen en las 3 anteriores</div></div>
+        </button>
+
+        <div id="query-ad-hoc" style="display:none;margin-top:10px">
+          <label>Tu pregunta</label>
+          <textarea id="q-libre" rows="2" placeholder="Ej: ¿Procede agente oficioso para este caso?"></textarea>
+          <button class="btn btn-sm" style="margin-top:8px" onclick="runConsulta()">Consultar</button>
+        </div>
+
+        <div class="spinner" id="ia-spinner"><div class="dot"></div><div class="dot"></div><div class="dot"></div><br><br>Consultando jurisprudencia…</div>
+        <div class="result-box" id="ia-result"></div>
+        <div class="result-actions" id="ia-actions" style="display:none">
+          <button class="btn btn-sm green" onclick="copiarABorrador()">📥 Usar este texto como borrador final</button>
+          <button class="btn btn-sm outline" onclick="copiarPortapapeles()">📋 Copiar al portapapeles</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast">✓ Guardado</div>
+
+<script>
+const LEAD = """ + lead_json + """;
+let lastResult = "";
+
+function toast(msg){
+  const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');
+  setTimeout(()=>t.classList.remove('on'),2400);
+}
+async function api(url,opts){
+  const r=await fetch(url,opts);
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(d.detail||'Error '+r.status);
+  return d;
+}
+
+async function setStatus(s){
+  const notes = prompt('Notas (opcional):')||'';
+  // usa admin endpoint requiere basic auth → mejor endpoint público del pro (si no existe, pedimos admin)
+  const user = prompt('Admin usuario (galeano):','galeano');
+  const pass = prompt('Admin password:');
+  if(!pass)return;
+  try{
+    await fetch('/api/admin/leads/'+LEAD.id,{method:'PATCH',
+      headers:{'Content-Type':'application/json','Authorization':'Basic '+btoa(user+':'+pass)},
+      body:JSON.stringify({status:s,notes})});
+    toast('✓ Estado: '+s);
+    setTimeout(()=>location.reload(),700);
+  }catch(e){alert(e.message);}
+}
+
+function descripcionEnriquecida(){
+  let base = LEAD.descripcion || '';
+  const acc = (document.getElementById('c-accionado')||{}).value||'';
+  const der = (document.getElementById('c-derecho')||{}).value||'';
+  const hec = (document.getElementById('c-hechos')||{}).value||'';
+  if(acc) base += `\\nAccionado exacto: ${acc}.`;
+  if(der) base += `\\nDerecho fundamental vulnerado: ${der}.`;
+  if(hec) base += `\\nInformación complementaria del abogado: ${hec}`;
+  return base;
+}
+
+async function runTool(modo){
+  document.getElementById('ia-result').classList.remove('on');
+  document.getElementById('ia-actions').style.display='none';
+  document.getElementById('query-ad-hoc').style.display='none';
+  if(modo==='consultar'){
+    document.getElementById('query-ad-hoc').style.display='block';
+    return;
+  }
+  document.getElementById('ia-spinner').classList.add('on');
+  try{
+    let r;
+    const desc = descripcionEnriquecida();
+    if(modo==='caso'){
+      r = await api('/api/pro/analizar-caso',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({descripcion:desc, nombre_cliente:LEAD.name||'', area:LEAD.area||null})});
+    }else if(modo==='tutela'){
+      r = await api('/api/pro/generar-tutela',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          nombre: LEAD.name||'',
+          cedula: LEAD.cedula||'',
+          accionado: (document.getElementById('c-accionado').value||'[COMPLETAR accionado]'),
+          derecho_vulnerado: (document.getElementById('c-derecho').value||'derechos fundamentales'),
+          hechos: desc,
+          area: LEAD.area||null,
+        })});
+    }else if(modo==='linea'){
+      const tema = prompt('Tema de la línea jurisprudencial:', LEAD.descripcion.slice(0,100));
+      if(!tema){document.getElementById('ia-spinner').classList.remove('on');return;}
+      r = await api('/api/pro/linea-jurisprudencial?tema='+encodeURIComponent(tema)+(LEAD.area?'&area='+LEAD.area:''));
+    }
+    mostrarResultado(r);
+  }catch(e){
+    document.getElementById('ia-result').textContent = '❌ '+e.message;
+    document.getElementById('ia-result').classList.add('on');
+  }
+  document.getElementById('ia-spinner').classList.remove('on');
+}
+
+async function runConsulta(){
+  const q = document.getElementById('q-libre').value.trim();
+  if(!q)return;
+  document.getElementById('ia-spinner').classList.add('on');
+  try{
+    const r = await api('/api/pro/consultar',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({pregunta:q+'. Contexto: '+descripcionEnriquecida(), area:LEAD.area||null})});
+    mostrarResultado(r);
+  }catch(e){
+    document.getElementById('ia-result').textContent = '❌ '+e.message;
+    document.getElementById('ia-result').classList.add('on');
+  }
+  document.getElementById('ia-spinner').classList.remove('on');
+}
+
+function mostrarResultado(r){
+  lastResult = r.respuesta || '';
+  let html = lastResult;
+  if(r.fichas_usadas && r.fichas_usadas.length){
+    html += '\\n\\n── Fichas usadas ──\\n' + r.fichas_usadas.map(f=>`• ${f.id} · Sala ${f.sala||'?'} ${f.anio||''}`).join('\\n');
+  }
+  const box = document.getElementById('ia-result');
+  box.textContent = html; box.classList.add('on');
+  document.getElementById('ia-actions').style.display='flex';
+}
+
+function copiarABorrador(){
+  if(!lastResult)return;
+  const ta = document.getElementById('draft-final');
+  ta.value = lastResult;
+  ta.focus();
+  toast('✓ Copiado al borrador final');
+}
+function copiarPortapapeles(){
+  if(!lastResult)return;
+  navigator.clipboard.writeText(lastResult).then(()=>toast('✓ Copiado al portapapeles'));
+}
+async function guardarBorrador(){
+  const draft = document.getElementById('draft-final').value.trim();
+  if(draft.length < 50){alert('El borrador debe tener al menos 50 caracteres.');return;}
+  try{
+    await api('/api/pro/leads/'+LEAD.id+'/draft',{method:'PUT',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({draft})});
+    toast('✓ Borrador guardado. El cliente verá esta versión al descargar.');
+  }catch(e){alert(e.message);}
+}
+</script>
+</body></html>"""
+
+
+# =============================================================================
 # ADMIN
 # =============================================================================
 
@@ -1553,7 +2005,8 @@ async function loadLeads(){
       <td><div class="truncate">${(l.descripcion||'').slice(0,140)}</div></td>
       <td><span class="badge ${l.status}">${l.status}</span></td>
       <td><div class="actions">
-        <button class="btn btn-sm outline" onclick="verLead(${l.id})">Ver</button>
+        <a class="btn btn-sm green" href="/pro/lead/${l.id}" target="_blank">🧠 Workspace</a>
+        <button class="btn btn-sm outline" onclick="verLead(${l.id})">Borrador</button>
         ${l.status==='verified'?`<button class="btn btn-sm green" onclick="setStatus(${l.id},'contacted')">Contactado</button>`:''}
         ${(l.status==='contacted'||l.status==='verified')?`<button class="btn btn-sm gold" onclick="setStatus(${l.id},'closed')">Cerrar</button>`:''}
       </div></td>

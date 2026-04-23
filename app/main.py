@@ -850,6 +850,43 @@ async def pro_lead_detail(lid: int, lawyer: dict = Depends(auth_mod.require_lawy
     raise HTTPException(404, "no encontrado")
 
 
+class ProDraftSave(BaseModel):
+    draft: str = Field(..., min_length=10)
+    notes: Optional[str] = None
+
+@app.put("/api/pro/leads/{lid}/draft")
+async def pro_save_draft(lid: int, body: ProDraftSave, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    """El abogado reemplaza el draft del cliente con su versión trabajada."""
+    with db_mod.db() as c:
+        r = c.execute("SELECT id, lawyer_id, area FROM leads WHERE id=?", (lid,)).fetchone()
+        if not r: raise HTTPException(404, "lead no encontrado")
+        # permitir al abogado asignado o a los que cubren el área
+        areas = set(lawyer.get("areas") or [])
+        if r["lawyer_id"] != lawyer["id"] and not ("*" in areas or r["area"] in areas):
+            raise HTTPException(403, "no autorizado para este lead")
+        c.execute("UPDATE leads SET draft=?, notes=COALESCE(?,notes) WHERE id=?",
+                  (body.draft, body.notes, lid))
+    return {"ok": True}
+
+
+@app.get("/pro/lead/{lid}", response_class=HTMLResponse)
+async def pro_lead_workspace(lid: int, request: Request, gh_session: Optional[str] = Cookie(default=None)):
+    data = auth_mod.parse_session(gh_session or "")
+    if not data:
+        return RedirectResponse("/pro/login", status_code=303)
+    lw = db_mod.get_lawyer(int(data["lid"]))
+    if not lw: return RedirectResponse("/pro/login", status_code=303)
+    leads = db_mod.list_leads(limit=2000)
+    lead = next((l for l in leads if l["id"] == lid), None)
+    if not lead:
+        return HTMLResponse("<h1>Lead no encontrado</h1><a href='/pro'>Volver</a>", status_code=404)
+    # permiso: asignado o área cubierta
+    areas = set(lw.get("areas") or [])
+    if lead.get("lawyer_id") != lw["id"] and not ("*" in areas or lead.get("area") in areas):
+        return HTMLResponse("<h1>No autorizado</h1><a href='/pro'>Volver</a>", status_code=403)
+    return ui_mod.lawyer_workspace_html(lw, lead)
+
+
 # ── Endpoints RAG completo (autenticado por sesión) ──────────────────────────
 
 class ConsultaRequest(BaseModel):
