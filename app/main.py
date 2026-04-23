@@ -655,6 +655,77 @@ async def pro_me(lawyer: dict = Depends(auth_mod.require_lawyer)):
             "available": bool(lawyer.get("available", 1))}
 
 
+@app.get("/api/pro/metrics")
+async def pro_metrics(lawyer: dict = Depends(auth_mod.require_lawyer)):
+    """Métricas personales del abogado: meta diaria, tasa de cierre, embudo 7d."""
+    areas = set(lawyer.get("areas") or [])
+    todos = "*" in areas
+    with db_mod.db() as c:
+        # Leads asignados directamente o que cubren su área
+        rows = c.execute(
+            """SELECT status, area, created_at, contacted_at, verified_at
+               FROM leads WHERE lawyer_id=? OR (?=1 AND lawyer_id IS NULL)
+               ORDER BY created_at DESC LIMIT 1000""",
+            (lawyer["id"], 1 if todos else 0),
+        ).fetchall()
+        leads = [dict(r) for r in rows]
+        if not todos:
+            leads = [l for l in leads if not l.get("area") or l.get("area") in areas]
+
+        # Cierres HOY (Bogotá TZ aproximado)
+        hoy = c.execute(
+            "SELECT COUNT(*) c FROM leads WHERE lawyer_id=? AND status='closed' AND date(contacted_at)=date('now','-5 hours')",
+            (lawyer["id"],)
+        ).fetchone()["c"]
+
+        # Citas próximas
+        citas = c.execute(
+            "SELECT COUNT(*) c FROM appointments WHERE lawyer_id=? AND status='scheduled' AND scheduled_at > datetime('now')",
+            (lawyer["id"],),
+        ).fetchone()["c"]
+
+        # Embudo 7d del abogado
+        d7 = c.execute(
+            """SELECT status, COUNT(*) c FROM leads
+               WHERE (lawyer_id=? OR (?=1 AND lawyer_id IS NULL))
+                 AND created_at > datetime('now','-7 days')
+               GROUP BY status""",
+            (lawyer["id"], 1 if todos else 0),
+        ).fetchall()
+        emb7d = {r["status"]: r["c"] for r in d7}
+
+    total = len(leads)
+    contacted = len([l for l in leads if l["status"] in ("contacted","closed")])
+    closed = len([l for l in leads if l["status"] == "closed"])
+    verified = len([l for l in leads if l["status"] in ("verified","contacted","closed")])
+
+    # Tiempo promedio de respuesta (verified -> contacted)
+    tiempos = []
+    for l in leads:
+        if l.get("verified_at") and l.get("contacted_at"):
+            try:
+                v = datetime.fromisoformat(l["verified_at"].replace(" ","T"))
+                k = datetime.fromisoformat(l["contacted_at"].replace(" ","T"))
+                tiempos.append((k - v).total_seconds() / 3600)
+            except Exception:
+                pass
+    tiempo_resp_h = round(sum(tiempos)/len(tiempos), 1) if tiempos else None
+
+    return {
+        "goal_daily": 10,
+        "closed_today": hoy,
+        "progress_pct": min(100, round(100*hoy/10)),
+        "upcoming_appointments": citas,
+        "total_leads": total,
+        "verified": verified,
+        "contacted": contacted,
+        "closed": closed,
+        "close_rate": round(100*closed/verified, 1) if verified else 0.0,
+        "avg_response_hours": tiempo_resp_h,
+        "funnel_7d": emb7d,
+    }
+
+
 class PatchMe(BaseModel):
     available: Optional[bool] = None
     password: Optional[str] = None

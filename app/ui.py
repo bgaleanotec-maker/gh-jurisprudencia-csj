@@ -93,15 +93,17 @@ def landing_html() -> str:
   .check input[type=checkbox]{margin-top:3px;width:16px;height:16px;flex-shrink:0;accent-color:var(--azul);}
   .check a{color:var(--azul);text-decoration:underline;}
 
-  /* BTN */
-  .btn{background:var(--azul);color:#fff;border:none;padding:14px 36px;border-radius:8px;
-       font-size:16px;font-weight:700;cursor:pointer;letter-spacing:.3px;width:100%;transition:transform .1s,box-shadow .15s;}
-  .btn:hover{background:var(--azul-2);transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,35,71,.2);}
-  .btn:disabled{background:#aab;cursor:wait;transform:none;box-shadow:none;}
-  .btn.gold{background:var(--oro);box-shadow:0 4px 14px rgba(197,160,89,.3);}
+  /* BTN — CTA primario VERDE (color theory: acción + éxito) */
+  .btn{background:var(--verde);color:#fff;border:none;padding:14px 36px;border-radius:8px;
+       font-size:16px;font-weight:700;cursor:pointer;letter-spacing:.3px;width:100%;
+       transition:background .15s,transform .1s,box-shadow .15s;}
+  .btn:hover{background:#15803d;transform:translateY(-1px);box-shadow:0 6px 18px rgba(22,163,74,.25);}
+  .btn:focus-visible{outline:3px solid var(--oro);outline-offset:2px;}
+  .btn:disabled{background:#9ca3af;cursor:wait;transform:none;box-shadow:none;}
+  .btn.azul{background:var(--azul);}
+  .btn.azul:hover{background:var(--azul-2);box-shadow:0 6px 18px rgba(0,35,71,.2);}
+  .btn.gold{background:var(--oro);}
   .btn.gold:hover{background:#b08a47;}
-  .btn.green{background:var(--verde);}
-  .btn.green:hover{background:#15803d;}
   .btn.outline{background:transparent;color:var(--azul);border:2px solid var(--azul);}
 
   /* PREVIEW */
@@ -205,12 +207,12 @@ def landing_html() -> str:
 </header>
 
 <section class="hero">
-  <h1>Tu tutela <span class="resaltar">respaldada en jurisprudencia real</span> de la Corte Suprema</h1>
-  <p class="lead">Cuéntanos tu caso. Analizamos contra sentencias reales de la Sala Civil, Laboral, Penal y Plena de la CSJ y generamos una simulación de tu acción de tutela para que la valides con un abogado.</p>
+  <h1>Te están <span class="resaltar">negando un derecho</span>.<br>Aquí tienes cómo recuperarlo.</h1>
+  <p class="lead">Describe tu caso. Cruzamos tu situación con sentencias reales de la Corte Suprema y te mostramos, en minutos, qué dice la ley y cuál es tu mejor camino.</p>
   <div class="badges">
-    <span class="badge-trust">📚 Sentencias CSJ 2018–2025</span>
-    <span class="badge-trust">⚖️ Radicados verificables en relatoría.cortesuprema.gov.co</span>
-    <span class="badge-trust">🔒 Ley 1581 · Habeas Data</span>
+    <span class="badge-trust">Sentencias CSJ 2018–2025</span>
+    <span class="badge-trust">Radicados verificables</span>
+    <span class="badge-trust">Habeas Data · Ley 1581</span>
   </div>
 </section>
 
@@ -223,37 +225,57 @@ def landing_html() -> str:
   </div>
 </section>
 
+<!-- POR QUÉ CONFIAR (Cialdini: autoridad + prueba social honesta + reciprocidad) -->
+<section class="bloque" style="padding:40px 16px 16px">
+  <div class="container-wide">
+    <div class="casos-grid">
+      <div class="caso">
+        <div class="titulo">Autoridad real</div>
+        <div class="desc">Cada cita viene de una sentencia pública de la Corte Suprema de Justicia. Puedes verificar todos los radicados en <a href="https://relatoria.cortesuprema.gov.co" target="_blank" rel="noopener">relatoria.cortesuprema.gov.co</a>.</div>
+      </div>
+      <div class="caso">
+        <div class="titulo">Sin costo oculto</div>
+        <div class="desc">La simulación es gratuita. La primera llamada con el abogado también. Si decides contratar representación, los honorarios se discuten antes, por escrito.</div>
+      </div>
+      <div class="caso">
+        <div class="titulo">Tus datos, protegidos</div>
+        <div class="desc">Tratamos tu información bajo la Ley 1581 de 2012. Tienes derecho a consultar, actualizar, rectificar o suprimir tus datos en cualquier momento.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <div class="container">
   <div class="pasos">
-    <div class="paso"><div class="num">1</div><div class="t">Cuenta tu caso</div><div class="d">Una sola pantalla</div></div>
-    <div class="paso"><div class="num">2</div><div class="t">Lee la simulación</div><div class="d">Con radicados CSJ</div></div>
-    <div class="paso"><div class="num">3</div><div class="t">Verifícate</div><div class="d">Código WhatsApp</div></div>
-    <div class="paso"><div class="num">4</div><div class="t">Agenda llamada</div><div class="d">Con un abogado</div></div>
+    <div class="paso"><div class="num">1</div><div class="t">Describe</div><div class="d">En tus palabras</div></div>
+    <div class="paso"><div class="num">2</div><div class="t">Conoce</div><div class="d">Qué dice la Corte</div></div>
+    <div class="paso"><div class="num">3</div><div class="t">Valida</div><div class="d">Con un abogado</div></div>
+    <div class="paso"><div class="num">4</div><div class="t">Actúa</div><div class="d">Con confianza</div></div>
   </div>
 
   <!-- STEP 1: DESCRIBIR -->
   <div class="card step on" id="step-1">
     <div class="nav-step">Paso 1 de 5</div>
-    <h2>📝 ¿Qué te está pasando?</h2>
-    <p class="muted" style="margin-bottom:20px">Cuéntanos en tus palabras: qué pasó, contra quién, desde cuándo. Cuanta más información, mejor la simulación.</p>
+    <h2>Cuéntame qué está pasando</h2>
+    <p class="muted" style="margin-bottom:20px">Sin formularios complicados. Escribe como le contarías a un amigo: qué pasó, contra quién, desde cuándo.</p>
 
     <div class="form-group">
-      <label>Describe tu caso *</label>
-      <textarea id="descripcion" placeholder="Ejemplo: La EPS Sanitas me niega desde hace 2 meses la quimioterapia que prescribió mi oncólogo. Soy paciente con cáncer de mama y no he podido iniciar tratamiento. Ya radiqué reclamación pero no responden..."></textarea>
+      <label>Tu caso *</label>
+      <textarea id="descripcion" autofocus placeholder="Por ejemplo: Mi EPS me niega desde hace dos meses la cirugía que me mandó el especialista. Ya reclamé y no responden. No puedo caminar bien..."></textarea>
     </div>
     <div class="form-group">
-      <label>Tipo de caso (la IA lo detecta solo)</label>
+      <label>Tipo de caso</label>
       <select id="area">
-        <option value="">Detección automática</option>
-        <option value="salud">Salud / EPS</option>
-        <option value="pensiones">Pensiones / Colpensiones</option>
-        <option value="laboral">Laboral / Despido</option>
-        <option value="accidentes">Accidente de tránsito / SOAT</option>
-        <option value="insolvencia">Insolvencia / Embargo</option>
-        <option value="derechos_fundamentales">Otros derechos fundamentales</option>
+        <option value="">Lo detectamos por ti</option>
+        <option value="salud">Salud · EPS</option>
+        <option value="pensiones">Pensiones · Colpensiones</option>
+        <option value="laboral">Laboral · Despido o fuero</option>
+        <option value="accidentes">Accidente de tránsito · SOAT</option>
+        <option value="insolvencia">Insolvencia · Embargos</option>
+        <option value="derechos_fundamentales">Otros derechos</option>
       </select>
     </div>
-    <button class="btn" onclick="generarPreview()">Generar simulación gratis</button>
+    <button class="btn" onclick="generarPreview()">Conocer mi caso</button>
     <div class="spinner" id="spinner-1"><div class="dot"></div><div class="dot"></div><div class="dot"></div><br><br>Analizando contra jurisprudencia de la Corte Suprema…</div>
     <div id="err-1"></div>
   </div>
@@ -261,8 +283,8 @@ def landing_html() -> str:
   <!-- STEP 2: PREVIEW -->
   <div class="card step" id="step-2">
     <div class="nav-step">Paso 2 de 5</div>
-    <h2>📄 Tu simulación de tutela</h2>
-    <p class="muted" style="margin-bottom:14px"><b>Aviso:</b> Esta simulación se basa en líneas jurisprudenciales reales de la Corte Suprema. Está pensada para que un abogado la revise y la presente — no es una asesoría jurídica autónoma.</p>
+    <h2>Esto dice la Corte sobre tu caso</h2>
+    <p class="muted" style="margin-bottom:14px">Simulación basada en líneas jurisprudenciales reales. Pensada para validar con un abogado — no es asesoría jurídica autónoma.</p>
     <div class="alert alert-info" id="alert-fichas"></div>
 
     <div class="preview-wrap">
@@ -282,8 +304,8 @@ def landing_html() -> str:
   <!-- STEP 3: REGISTRO -->
   <div class="card step" id="step-3">
     <div class="nav-step">Paso 3 de 5</div>
-    <h2>🪪 Verifica tu identidad</h2>
-    <p class="muted" style="margin-bottom:20px">Necesitamos confirmar que eres una persona real para evitar abuso. Tus datos están protegidos por la <b>Ley 1581 de 2012</b>.</p>
+    <h2>Un paso más para acompañarte</h2>
+    <p class="muted" style="margin-bottom:20px">Solo necesitamos tu contacto para que un abogado se conecte contigo. Tus datos están protegidos por la <b>Ley 1581 de 2012</b>.</p>
 
     <div class="row">
       <div class="form-group">
@@ -328,14 +350,14 @@ def landing_html() -> str:
   <!-- STEP 4: OTP -->
   <div class="card step" id="step-4">
     <div class="nav-step">Paso 4 de 5</div>
-    <h2>🔐 Ingresa el código</h2>
+    <h2>Ingresa el código</h2>
     <p class="muted" id="otp-msg" style="margin-bottom:20px">Te enviamos un código de 6 dígitos por WhatsApp.</p>
 
     <div class="form-group">
       <label>Código de 6 dígitos</label>
       <input type="text" id="r-otp" class="otp-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="······">
     </div>
-    <button class="btn gold" onclick="verificarOtp()">🔓 Verificar y desbloquear</button>
+    <button class="btn" onclick="verificarOtp()">Verificar y ver mi caso completo</button>
     <div class="spinner" id="spinner-4"><div class="dot"></div><div class="dot"></div><div class="dot"></div><br><br>Verificando…</div>
     <div id="err-4"></div>
     <p class="muted" style="margin-top:14px;text-align:center">¿No recibiste el código? <a href="#" onclick="reenviarOtp();return false" style="color:var(--azul)">Reenviar</a></p>
@@ -445,7 +467,7 @@ def landing_html() -> str:
     <p class="section-sub" style="margin-bottom:24px">Lo que la mayoría de personas pregunta antes de agendar.</p>
 
     <details><summary>¿Es realmente gratis?</summary>
-    <div class="body">Generar la simulación, descargar el documento Word y la consulta inicial de 30 minutos por WhatsApp con un abogado son gratis. Si luego decides que te representemos en el proceso, conversamos los honorarios según la complejidad del caso.</div></details>
+    <div class="body">La simulación, el documento Word y la primera llamada de 30 minutos con un abogado son gratis. Para referencia, un abogado particular suele cobrar entre $400.000 y $1.000.000 por presentar una tutela de salud; nuestros honorarios para casos estándar se mueven en un rango considerablemente menor y los conversamos durante la llamada según la complejidad.</div></details>
 
     <details><summary>¿La simulación sirve para presentarla yo mismo en el juzgado?</summary>
     <div class="body">Es un excelente punto de partida, pero <b>no recomendamos</b> presentarla sin que un abogado la revise. La tutela tiene requisitos formales (legitimación, subsidiariedad, inmediatez) que un juez puede usar para inadmitirla. La revisión por nuestro equipo cuesta menos de lo que te ahorras.</div></details>
@@ -819,6 +841,31 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
   .spinner{display:none;text-align:center;padding:14px;color:#002347;font-size:13px;}
   .spinner.on{display:block;}
   .badge-fch{background:#e3f0ff;color:#004a9f;padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700;margin:2px;display:inline-block;}
+  /* Meta diaria gamificada */
+  .goal-card{background:linear-gradient(135deg,#002347 0%,#003f7a 100%);color:#fff;padding:20px 24px;border-radius:12px;margin-bottom:18px;position:relative;overflow:hidden;}
+  .goal-card::after{content:'';position:absolute;top:0;right:0;width:180px;height:100%;background:radial-gradient(circle,rgba(197,160,89,.2) 0%,transparent 70%);}
+  .goal-card h3{font-size:13px;color:#C5A059;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:8px;font-weight:700;}
+  .goal-card .progress{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;}
+  .goal-card .big{font-size:40px;font-weight:800;line-height:1;}
+  .goal-card .of{font-size:18px;opacity:.7;}
+  .goal-card .lbl{font-size:13px;opacity:.85;}
+  .bar{width:100%;height:8px;background:rgba(255,255,255,.15);border-radius:4px;overflow:hidden;}
+  .bar .fill{height:100%;background:linear-gradient(90deg,#16a34a 0%,#C5A059 100%);transition:width .5s;}
+  .mini-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+  @media(max-width:680px){.mini-stats{grid-template-columns:repeat(2,1fr);}}
+  .mini-stat{background:#fff;padding:14px;border-radius:8px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+  .mini-stat .k{font-size:22px;font-weight:800;color:#002347;line-height:1;}
+  .mini-stat .v{font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-top:5px;font-weight:600;}
+  .mini-stat.ok .k{color:#16a34a;}
+  .mini-stat.warn .k{color:#C5A059;}
+  /* Embudo personal */
+  .funnel-personal{background:#fff;padding:18px;border-radius:10px;border:1px solid #e5e7eb;margin-bottom:18px;}
+  .funnel-personal h4{color:#002347;font-size:14px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px;}
+  .funnel-row2{display:flex;align-items:center;gap:12px;margin-bottom:6px;font-size:13px;}
+  .funnel-row2 .label2{width:140px;font-weight:600;color:#374151;font-size:12px;}
+  .funnel-row2 .bar2{flex:1;height:22px;background:#f3f4f6;border-radius:4px;position:relative;overflow:hidden;}
+  .funnel-row2 .bar2 .fill2{height:100%;background:#002347;display:flex;align-items:center;padding-left:8px;color:#fff;font-size:11px;font-weight:700;}
+
   .meeting-card{background:#f0f9ff;border-left:4px solid #002347;padding:14px;border-radius:0 6px 6px 0;margin-bottom:10px;}
   .meeting-card h4{color:#002347;font-size:14px;margin-bottom:6px;}
   .meeting-card .meta{font-size:12px;color:#555;margin-bottom:6px;}
@@ -865,7 +912,10 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
     <span id="toggle-label">Disponible para nuevos casos</span>
   </div>
 
-  <div class="stats" id="stats"></div>
+  <!-- Meta diaria + embudo personal -->
+  <div id="goal-block"></div>
+  <div class="mini-stats" id="mini-stats"></div>
+  <div class="funnel-personal" id="funnel-personal"></div>
 
   <div class="tabs">
     <div class="tab on" onclick="tab('agenda')">📅 Agenda</div>
@@ -990,17 +1040,53 @@ async function toggleDisp(){
 }
 
 async function loadStats(){
-  const leads = await api('/api/pro/leads');
-  const appts = await api('/api/pro/appointments?upcoming=true');
-  const ver = leads.filter(l=>l.status==='verified').length;
-  const cont = leads.filter(l=>l.status==='contacted').length;
-  const cls = leads.filter(l=>l.status==='closed').length;
-  document.getElementById('stats').innerHTML = `
-    <div class="stat"><div class="num">${leads.length}</div><div class="lbl">Mis leads totales</div></div>
-    <div class="stat"><div class="num" style="color:#1e40af">${ver}</div><div class="lbl">Por contactar</div></div>
-    <div class="stat"><div class="num" style="color:#16a34a">${cont}</div><div class="lbl">Contactados</div></div>
-    <div class="stat"><div class="num">${cls}</div><div class="lbl">Cerrados</div></div>
-    <div class="stat"><div class="num" style="color:#C5A059">${appts.length}</div><div class="lbl">Citas próximas</div></div>`;
+  const m = await api('/api/pro/metrics');
+  // Meta diaria gamificada
+  const pct = m.progress_pct;
+  const msg = pct >= 100 ? '🏆 ¡Meta alcanzada hoy!'
+           : pct >= 50 ? 'Vas a buen ritmo. Sigue.'
+           : pct > 0  ? 'Primer cierre hecho. Al próximo.'
+           : 'Arranquemos el día.';
+  document.getElementById('goal-block').innerHTML = `
+    <div class="goal-card">
+      <h3>Meta diaria</h3>
+      <div class="progress">
+        <span class="big">${m.closed_today}</span>
+        <span class="of">/ ${m.goal_daily} tutelas cerradas hoy</span>
+      </div>
+      <div class="bar"><div class="fill" style="width:${pct}%"></div></div>
+      <div class="lbl" style="margin-top:8px">${msg}</div>
+    </div>`;
+
+  // Mini stats
+  const respLabel = m.avg_response_hours == null ? '—'
+    : m.avg_response_hours < 2 ? m.avg_response_hours + ' h'
+    : m.avg_response_hours + ' h';
+  const respKlass = m.avg_response_hours == null ? '' :
+                    m.avg_response_hours <= 2 ? 'ok' :
+                    m.avg_response_hours <= 6 ? 'warn' : '';
+  const closeKlass = m.close_rate >= 25 ? 'ok' : m.close_rate >= 15 ? 'warn' : '';
+  document.getElementById('mini-stats').innerHTML = `
+    <div class="mini-stat"><div class="k">${m.verified}</div><div class="v">Leads por contactar</div></div>
+    <div class="mini-stat"><div class="k">${m.upcoming_appointments}</div><div class="v">Citas próximas</div></div>
+    <div class="mini-stat ${closeKlass}"><div class="k">${m.close_rate}%</div><div class="v">Tasa de cierre</div></div>
+    <div class="mini-stat ${respKlass}"><div class="k">${respLabel}</div><div class="v">Tiempo respuesta promedio</div></div>`;
+
+  // Embudo personal 7d
+  const f = m.funnel_7d || {};
+  const etapas = [
+    ['verified','Verificados'],
+    ['contacted','Contactados'],
+    ['closed','Cerrados'],
+  ];
+  const max = Math.max(1, ...etapas.map(([k])=>f[k]||0));
+  const rows = etapas.map(([k,lbl])=>{
+    const v = f[k]||0; const w = max ? (v/max*100) : 0;
+    return `<div class="funnel-row2"><div class="label2">${lbl}</div>
+      <div class="bar2"><div class="fill2" style="width:${w}%">${v>0?v:''}</div></div></div>`;
+  }).join('');
+  document.getElementById('funnel-personal').innerHTML =
+    `<h4>📊 Mi embudo · últimos 7 días</h4>${rows}`;
 }
 
 async function loadLeads(){
