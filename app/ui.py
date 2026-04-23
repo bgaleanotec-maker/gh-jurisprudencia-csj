@@ -86,6 +86,11 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'Segoe UI',-apple-system,'Inter',sans-serif;background:#fff;color:var(--texto);line-height:1.55;}
 
+  /* Skip link — invisible hasta recibir foco (accesibilidad) */
+  .skip-link{position:absolute;left:-9999px;top:0;background:var(--azul);color:#fff;padding:12px 18px;z-index:1000;
+             font-weight:700;border-radius:0 0 6px 0;text-decoration:none;}
+  .skip-link:focus{left:0;outline:3px solid var(--oro);outline-offset:0;}
+
   /* ACTION BAR sticky */
   .action-bar{position:sticky;top:0;z-index:40;background:linear-gradient(135deg,var(--azul) 0%,var(--azul-2) 100%);
               color:#fff;padding:10px 16px;display:flex;justify-content:center;align-items:center;gap:14px;
@@ -117,14 +122,12 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
   .case-card{flex:0 0 280px;scroll-snap-align:start;background:#fff;border:1px solid var(--gris-soft);border-radius:12px;
              padding:18px;cursor:pointer;transition:all .15s;position:relative;}
   .case-card:hover{border-color:var(--oro);transform:translateY(-3px);box-shadow:0 10px 24px rgba(0,0,0,.08);}
+  /* Badges unificados al sistema: azul para todas las áreas (coherencia cromática).
+     La distinción por área se hace con el texto, no con 6 colores que distraen. */
   .case-card .ab{display:inline-block;padding:3px 10px;font-size:10px;font-weight:700;border-radius:10px;
-                 text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;color:#fff;}
-  .case-card .ab.salud{background:#16a34a;}
-  .case-card .ab.laboral{background:#7c3aed;}
-  .case-card .ab.pensiones{background:#0891b2;}
-  .case-card .ab.accidentes{background:#ea580c;}
-  .case-card .ab.insolvencia{background:#64748b;}
-  .case-card .ab.derechos_fundamentales{background:#C5A059;}
+                 text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;
+                 background:#e3f0ff;color:var(--azul);}
+  .case-card:hover .ab{background:var(--oro);color:#fff;}
   .case-card .tt{font-weight:700;color:var(--azul);font-size:15px;margin-bottom:6px;line-height:1.3;}
   .case-card .ds{font-size:13px;color:#6b7280;line-height:1.5;}
   .case-card .go{position:absolute;top:14px;right:14px;color:var(--verde);font-size:16px;opacity:0;transition:opacity .15s;}
@@ -134,13 +137,22 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
                    color:var(--azul);font-size:14px;transition:all .15s;}
   .case-nav button:hover{border-color:var(--oro);background:var(--gris);}
 
-  /* HERO sobrio */
+  /* HERO sobrio · responsive */
   .hero{background:var(--azul);color:#fff;padding:52px 16px 56px;text-align:center;border-bottom:3px solid var(--oro);}
   .hero h1{font-size:36px;font-weight:700;line-height:1.2;max-width:820px;margin:0 auto 14px;letter-spacing:-.5px;}
   .hero h1 .resaltar{color:var(--oro);}
   .hero p.lead{font-size:17px;opacity:.9;max-width:620px;margin:0 auto 24px;font-weight:300;line-height:1.5;}
   .badges{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:20px;}
   .badge-trust{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);padding:5px 12px;border-radius:4px;font-size:12px;font-weight:500;}
+  @media(max-width:620px){
+    .hero{padding:32px 16px 40px;}
+    .hero h1{font-size:26px;line-height:1.18;letter-spacing:-.3px;margin-bottom:10px;}
+    .hero p.lead{font-size:14px;line-height:1.45;margin-bottom:16px;}
+    .badges{gap:6px;margin-top:14px;}
+    .badge-trust{font-size:11px;padding:4px 10px;}
+    .stats-bar{padding:16px 12px;}
+    .stat .num{font-size:22px;}
+  }
 
   /* BARRA STATS */
   .stats-bar{background:#fff;padding:24px 16px;border-bottom:1px solid var(--gris-soft);}
@@ -259,12 +271,27 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
   footer p{font-size:12px;opacity:.7;}
   footer a{color:var(--oro);text-decoration:none;}
 
-  /* SPINNER */
+  /* SPINNER simple (para pasos que no son el preview) */
   .spinner{display:none;text-align:center;padding:30px;color:var(--azul);}
   .spinner.on{display:block;}
   .spinner .dot{display:inline-block;width:10px;height:10px;background:var(--oro);border-radius:50%;margin:0 4px;animation:bounce 1.2s infinite;}
   .spinner .dot:nth-child(2){animation-delay:.2s;}.spinner .dot:nth-child(3){animation-delay:.4s;}
   @keyframes bounce{0%,80%,100%{transform:scale(.6);opacity:.4;}40%{transform:scale(1);opacity:1;}}
+
+  /* SKELETON para generación de simulación */
+  .skeleton{display:none;margin:20px 0;}
+  .skeleton.on{display:block;}
+  .sk-msg{text-align:center;color:var(--azul);font-weight:600;font-size:14px;margin-bottom:18px;min-height:22px;}
+  .sk-msg span{display:inline-block;animation:pulseText 1.5s ease-in-out infinite;}
+  @keyframes pulseText{0%,100%{opacity:.55;}50%{opacity:1;}}
+  .sk-line{height:14px;border-radius:4px;margin-bottom:10px;
+           background:linear-gradient(90deg,#eef2f7 25%,#dce3ef 50%,#eef2f7 75%);
+           background-size:200% 100%;animation:shimmer 1.4s infinite;}
+  @keyframes shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
+  .sk-line.short{width:40%;}
+  .sk-line.mid{width:70%;}
+  .sk-line.long{width:95%;}
+  .sk-block{margin-bottom:18px;}
 
   .step{display:none;}.step.on{display:block;}
   .nav-step{font-size:12px;color:#888;text-align:center;margin-bottom:14px;letter-spacing:1px;text-transform:uppercase;}
@@ -307,12 +334,15 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
 </head>
 <body>
 
+<!-- Skip to main content (accesibilidad lectores de pantalla / teclado) -->
+<a href="#main" class="skip-link">Saltar al contenido principal</a>
+
 <!-- Action bar sticky: visible siempre -->
-<div class="action-bar">
+<nav class="action-bar" aria-label="Barra principal de acción">
   <div class="action-msg">⚡ Genera tu tutela en 2 minutos, respaldada en sentencias de la Corte Suprema</div>
-  <a class="action-cta" href="#step-1" onclick="scrollToWizard(event)">Empezar ahora →</a>
-  <a class="action-aux" href="/pro/login">Abogados</a>
-</div>
+  <a class="action-cta" href="#step-1" onclick="scrollToWizard(event)" aria-label="Ir al formulario para empezar mi caso">Empezar ahora →</a>
+  <a class="action-aux" href="/pro/login" aria-label="Acceso para abogados">Abogados</a>
+</nav>
 
 <header>
   <div class="logo">Galeano <span>Herrera</span></div>
@@ -323,7 +353,7 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
   </nav>
 </header>
 
-<section class="hero">
+<header class="hero" role="banner">
   <h1>Te están <span class="resaltar">negando un derecho</span>.<br>Aquí tienes cómo recuperarlo.</h1>
   <p class="lead">Describe tu caso. Cruzamos tu situación con sentencias reales de la Corte Suprema y te mostramos, en minutos, qué dice la ley y cuál es tu mejor camino.</p>
   <div class="badges">
@@ -331,9 +361,9 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
     <span class="badge-trust">Radicados verificables</span>
     <span class="badge-trust">Habeas Data · Ley 1581</span>
   </div>
-</section>
+</header>
 
-<section class="stats-bar">
+<section class="stats-bar" aria-label="Estadísticas de la plataforma">
   <div class="grid">
     <div class="stat"><div class="num" id="s-fichas">—</div><div class="lbl">Sentencias indexadas</div></div>
     <div class="stat"><div class="num">6</div><div class="lbl">Áreas legales cubiertas</div></div>
@@ -372,7 +402,7 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
     <button onclick="scrollCases(-1)" aria-label="Anterior">◀</button>
     <button onclick="scrollCases(1)" aria-label="Siguiente">▶</button>
   </div>
-  <div class="cases-scroll" id="cases-scroll">
+  <div class="cases-scroll" id="cases-scroll" role="list" aria-label="Tipos de tutela más frecuentes">
     <!-- SALUD -->
     <div class="case-card" data-area="salud" data-ej="Mi EPS Sanitas me niega desde hace 2 meses la quimioterapia que me prescribió el oncólogo. Soy paciente con cáncer de mama y no he podido iniciar tratamiento. Ya radiqué PQR y no responden."><span class="ab salud">Salud</span><div class="tt">EPS niega medicamento oncológico</div><div class="ds">Quimioterapia, radioterapia o fármacos no POS que la EPS rechaza por "no cobertura".</div><div class="go">→</div></div>
     <div class="case-card" data-area="salud" data-ej="El ortopedista ordenó cirugía de rodilla hace 4 meses. La EPS dice que debo esperar autorización pero no avanza. Tengo dolor crónico y no puedo caminar bien."><span class="ab salud">Salud</span><div class="tt">Cirugía prescrita sin autorizar</div><div class="ds">Reemplazo de cadera, columna, cesárea programada y otras cirugías que se demoran meses.</div><div class="go">→</div></div>
@@ -421,14 +451,7 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
   </div>
 </section>
 
-<div class="container">
-  <div class="pasos">
-    <div class="paso"><div class="num">1</div><div class="t">Describe</div><div class="d">En tus palabras</div></div>
-    <div class="paso"><div class="num">2</div><div class="t">Conoce</div><div class="d">Qué dice la Corte</div></div>
-    <div class="paso"><div class="num">3</div><div class="t">Valida</div><div class="d">Con un abogado</div></div>
-    <div class="paso"><div class="num">4</div><div class="t">Actúa</div><div class="d">Con confianza</div></div>
-  </div>
-
+<main id="main" class="container">
   <!-- STEP 1: WIZARD CARRUSEL (5 micro-pasos) -->
   <div class="card step on" id="step-1">
 
@@ -539,7 +562,25 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
       </div>
     </div>
 
-    <div class="spinner" id="spinner-1"><div class="dot"></div><div class="dot"></div><div class="dot"></div><br><br>Analizando contra jurisprudencia de la Corte Suprema…</div>
+    <!-- Skeleton loader con mensajes secuenciales (más profesional que un spinner) -->
+    <div class="skeleton" id="skeleton-1" aria-live="polite" aria-busy="true">
+      <div class="sk-msg"><span id="sk-msg-text">Analizando tu caso…</span></div>
+      <div class="sk-block">
+        <div class="sk-line long"></div>
+        <div class="sk-line long"></div>
+        <div class="sk-line mid"></div>
+      </div>
+      <div class="sk-block">
+        <div class="sk-line short"></div>
+        <div class="sk-line long"></div>
+        <div class="sk-line long"></div>
+        <div class="sk-line mid"></div>
+      </div>
+      <div class="sk-block">
+        <div class="sk-line short"></div>
+        <div class="sk-line mid"></div>
+      </div>
+    </div>
     <div id="err-1"></div>
 
     <!-- input oculto para compatibilidad -->
@@ -682,7 +723,7 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
     </div>
     <button class="btn outline" onclick="window.location.href='/'">Volver al inicio</button>
   </div>
-</div>
+</main>
 
 <!-- ÁREAS QUE CUBRIMOS -->
 <section class="bloque gris" id="casos">
@@ -882,15 +923,40 @@ function aplicarHintsArea(area, placeholderTextarea=true){
   if(ta && placeholderTextarea) ta.placeholder = h.ej;
 }
 
-// Selección de tipo (paso 1.1)
-document.querySelectorAll('.tipo-card').forEach(c=>c.addEventListener('click',()=>{
-  document.querySelectorAll('.tipo-card').forEach(x=>x.classList.remove('sel'));
-  c.classList.add('sel');
-  const area = c.dataset.area;
-  document.getElementById('area').value = area;
-  document.getElementById('wiz-next-1').disabled = false;
-  aplicarHintsArea(area);
-}));
+// Selección de tipo (paso 1.1) — con auto-advance tras 450ms
+document.querySelectorAll('.tipo-card').forEach(c=>{
+  c.setAttribute('role','button');
+  c.setAttribute('tabindex','0');
+  const pick = ()=>{
+    document.querySelectorAll('.tipo-card').forEach(x=>x.classList.remove('sel'));
+    c.classList.add('sel');
+    const area = c.dataset.area;
+    document.getElementById('area').value = area;
+    document.getElementById('wiz-next-1').disabled = false;
+    aplicarHintsArea(area);
+    // Auto-advance (UX: reduce un click)
+    setTimeout(()=>{ if(wizStep === 1) wizShow(2); }, 450);
+  };
+  c.addEventListener('click', pick);
+  c.addEventListener('keydown', e=>{ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); pick(); } });
+});
+
+// Enter en cualquier input del wizard → siguiente paso
+document.addEventListener('keydown', e=>{
+  if(e.key !== 'Enter') return;
+  const active = document.querySelector('.wiz-panel.on');
+  if(!active) return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  // no interferir con textarea ni selects
+  if(tag === 'textarea' || tag === 'select') return;
+  if(tag === 'input' && e.target.type !== 'text' && e.target.type !== 'tel' &&
+     e.target.type !== 'email' && e.target.type !== 'date' && e.target.type !== 'number') return;
+  // Si está en el último paso, disparar generación
+  if(wizStep === 5){ e.preventDefault(); generarPreview(); return; }
+  // Cualquier otro paso: avanzar
+  e.preventDefault();
+  wizNext(wizStep);
+});
 
 // Acción bar: scroll al wizard
 function scrollToWizard(ev){
@@ -949,11 +1015,44 @@ function wizNext(from){
 }
 function wizPrev(from){ wizShow(from-1); }
 
+let _skMsgTimer = null;
+function iniciarSkeleton(){
+  const box = document.getElementById('skeleton-1');
+  if(box) box.classList.add('on');
+  // ocultar el wizard mientras carga
+  document.querySelectorAll('.wiz-panel').forEach(p=>p.style.display='none');
+  document.querySelector('.wiz-progress').style.display='none';
+  const msgs = [
+    'Analizando tu caso…',
+    'Buscando precedentes en la Corte Suprema…',
+    'Seleccionando las sentencias más relevantes…',
+    'Redactando tu simulación de tutela…',
+    'Casi listo, puliendo el documento…',
+  ];
+  let i = 0;
+  const el = document.getElementById('sk-msg-text');
+  if(el) el.textContent = msgs[0];
+  _skMsgTimer = setInterval(()=>{
+    i = Math.min(i+1, msgs.length-1);
+    if(el) el.textContent = msgs[i];
+  }, 2400);
+}
+function detenerSkeleton(){
+  const box = document.getElementById('skeleton-1');
+  if(box) box.classList.remove('on');
+  if(_skMsgTimer){ clearInterval(_skMsgTimer); _skMsgTimer = null; }
+  document.querySelector('.wiz-progress').style.display='';
+  // re-mostrar el panel actual
+  const on = document.querySelector('.wiz-panel.on');
+  if(on) on.style.display='block';
+  else document.getElementById('wiz-1').style.display='block';
+}
+
 async function generarPreview(){
   const desc = document.getElementById('descripcion').value.trim();
   if(desc.length < 30){err('err-1','Cuéntanos más detalle (mínimo 30 caracteres). ¿Qué pasó, contra quién y desde cuándo?');wizShow(4);return;}
   err('err-1','');
-  spin('spinner-1', true);
+  iniciarSkeleton();
   try{
     // Componer descripción enriquecida (fecha + reclamo previo si los dio)
     let descFinal = desc;
@@ -984,7 +1083,7 @@ async function generarPreview(){
       (d.area_detectada ? `<br><br><b>Área detectada:</b> ${d.area_detectada}` : '');
     show('step-2');
   }catch(e){err('err-1', e.message);}
-  spin('spinner-1', false);
+  detenerSkeleton();
 }
 
 function irRegistro(){show('step-3');}
@@ -1499,7 +1598,30 @@ async function loadLeads(){
   const status = document.getElementById('filter-leads').value;
   const data = await api('/api/pro/leads'+(status?'?status='+status:''));
   const tbody = document.querySelector('#t-leads tbody');
-  if(!data.length){tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:#888;padding:30px">Sin leads aún</td></tr>';return;}
+  if(!data.length){
+    const msgSinFiltro = `
+      <div style="padding:48px 20px;text-align:center">
+        <div style="font-size:56px;margin-bottom:12px">📥</div>
+        <div style="font-size:18px;font-weight:700;color:#002347;margin-bottom:8px">Aún no llegan leads</div>
+        <div style="font-size:13px;color:#6b7280;max-width:420px;margin:0 auto 20px;line-height:1.55">
+          Cuando un cliente complete el formulario de la landing y verifique su celular,
+          aparecerá aquí y tú recibirás notificación por WhatsApp en menos de 10 segundos.
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <a class="btn btn-sm" href="/" target="_blank">Ver landing pública →</a>
+          <a class="btn btn-sm outline" href="/admin" target="_blank">Panel admin</a>
+        </div>
+      </div>`;
+    const msgFiltrado = `
+      <div style="padding:40px 20px;text-align:center">
+        <div style="font-size:40px;margin-bottom:10px">🔍</div>
+        <div style="font-weight:700;color:#002347;margin-bottom:8px">Sin leads con ese filtro</div>
+        <div style="font-size:13px;color:#6b7280;margin-bottom:14px">Intenta cambiar el filtro o revisar todos los leads.</div>
+        <button class="btn btn-sm outline" onclick="document.getElementById('filter-leads').value='';loadLeads();">Ver todos</button>
+      </div>`;
+    tbody.innerHTML = `<tr><td colspan="7">${status?msgFiltrado:msgSinFiltro}</td></tr>`;
+    return;
+  }
   tbody.innerHTML = data.map(l=>`
     <tr>
       <td style="font-size:11px;color:#888">${(l.created_at||'').slice(0,16)}</td>
@@ -1550,7 +1672,18 @@ async function setStatus(id,s){
 async function loadAppts(){
   const data = await api('/api/pro/appointments?upcoming=true');
   const cont = document.getElementById('appts-cont');
-  if(!data.length){cont.innerHTML = '<div style="text-align:center;color:#888;padding:30px">No tienes citas próximas. Los clientes que descarguen su simulación pueden agendar contigo automáticamente.</div>';return;}
+  if(!data.length){
+    cont.innerHTML = `
+      <div style="padding:40px 20px;text-align:center">
+        <div style="font-size:48px;margin-bottom:10px">📅</div>
+        <div style="font-size:16px;font-weight:700;color:#002347;margin-bottom:6px">Agenda libre</div>
+        <div style="font-size:13px;color:#6b7280;max-width:440px;margin:0 auto;line-height:1.55">
+          Cuando un cliente verificado agende una llamada en la landing,
+          su cita aparecerá aquí con el link de Google Meet listo.
+        </div>
+      </div>`;
+    return;
+  }
   cont.innerHTML = data.map(a=>{
     const d = new Date(a.scheduled_at);
     const fmt = d.toLocaleString('es-CO',{weekday:'long',day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
