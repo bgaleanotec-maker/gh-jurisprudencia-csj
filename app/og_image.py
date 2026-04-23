@@ -89,23 +89,25 @@ def generar_og_png() -> bytes:
         d.text((60, y+72),  "un derecho.", font=f_h1, fill=_ORO)
         d.text((60, y+144), "Recuperalo en 2 minutos.", font=f_h1_2, fill=_BLANCO)
 
-        # Bullet bar inferior
-        f_b = _find_font(22)
+        # Bullet bar inferior — textos cortos que caben en una sola fila de 1200
+        f_b = _find_font(20)
         bullets = [
-            "Simulación respaldada en la Corte Suprema",
+            "Respaldo en la Corte Suprema",
             "Radicados verificables",
-            "Llamada gratis con un abogado",
+            "Abogado en WhatsApp",
         ]
-        y_b = 540
+        y_b = 542
         d.rectangle([(0, 510), (_W, _H)], fill=(0, 20, 50))
         d.rectangle([(0, 510), (_W, 514)], fill=_ORO)
+        # Calcular ancho total y distribuir
+        widths = [int(d.textlength(b, font=f_b)) if hasattr(d, "textlength") else len(b)*11 for b in bullets]
+        total_text = sum(widths)
+        gap = (_W - 120 - total_text - 3*26) // 2   # 3 bullets => 2 gaps ; 26 = circle+margin
         x = 60
         for i, b in enumerate(bullets):
-            d.ellipse([(x, y_b+8), (x+10, y_b+18)], fill=_VERDE)
+            d.ellipse([(x, y_b+7), (x+12, y_b+19)], fill=_VERDE)
             d.text((x+22, y_b), b, font=f_b, fill=_BLANCO)
-            # calcular ancho aprox del bullet para pasar al siguiente
-            bw = int(d.textlength(b, font=f_b)) if hasattr(d, "textlength") else (len(b)*12)
-            x += bw + 70
+            x += widths[i] + 26 + (gap if i < len(bullets)-1 else 0)
 
         # Footer: URL + pequeño disclaimer
         f_u = _find_font(16)
