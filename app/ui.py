@@ -353,18 +353,16 @@ def landing_html() -> str:
       </div>
     </div>
 
-    <h3 style="margin-top:24px">Autorizaciones (Ley 1581)</h3>
-    <label class="check">
-      <input type="checkbox" id="c-terms">
-      <span>Acepto los <a href="#" onclick="modal('m-terms');return false">Términos y Condiciones</a> del servicio. *</span>
-    </label>
-    <label class="check">
-      <input type="checkbox" id="c-data">
-      <span>Autorizo el tratamiento de mis datos personales según la <a href="#" onclick="modal('m-data');return false">Política de Habeas Data</a>. *</span>
-    </label>
-    <label class="check">
-      <input type="checkbox" id="c-mkt">
-      <span>Autorizo a Galeano Herrera | Abogados a contactarme con fines comerciales por WhatsApp, llamada o correo. *</span>
+    <h3 style="margin-top:24px">Autorización</h3>
+    <label class="check" style="align-items:flex-start;background:#f6f8fb;padding:14px;border-radius:8px;border:1px solid #e5e7eb">
+      <input type="checkbox" id="c-all">
+      <span style="font-size:13px;line-height:1.55">
+        Acepto los <a href="#" onclick="modal('m-terms');return false">Términos y Condiciones</a>,
+        autorizo el tratamiento de mis datos personales conforme a la
+        <a href="#" onclick="modal('m-data');return false">Política de Habeas Data</a> (Ley 1581 de 2012)
+        y autorizo a <b>Galeano Herrera | Abogados</b> a contactarme con fines comerciales por
+        WhatsApp, llamada o correo. *
+      </span>
     </label>
 
     <button class="btn" onclick="enviarRegistro()" style="margin-top:18px">📲 Enviarme código por WhatsApp</button>
@@ -641,18 +639,19 @@ async function generarPreview(){
 function irRegistro(){show('step-3');}
 
 async function enviarRegistro(){
+  const all = document.getElementById('c-all').checked;
   const data = {
     token: currentToken,
     name:   document.getElementById('r-nombre').value.trim(),
     cedula: document.getElementById('r-cedula').value.trim(),
     phone:  document.getElementById('r-phone').value.trim(),
     email:  document.getElementById('r-email').value.trim(),
-    consent_terms:     document.getElementById('c-terms').checked,
-    consent_data:      document.getElementById('c-data').checked,
-    consent_marketing: document.getElementById('c-mkt').checked,
+    consent_terms:     all,
+    consent_data:      all,
+    consent_marketing: all,
   };
   if(!data.name || !data.cedula || !data.phone || !data.email){err('err-3','Completa todos los campos obligatorios.');return;}
-  if(!data.consent_terms || !data.consent_data || !data.consent_marketing){err('err-3','Debes aceptar las 3 autorizaciones para continuar.');return;}
+  if(!all){err('err-3','Debes aceptar la autorización para continuar.');return;}
   err('err-3',''); spin('spinner-3', true);
   try{
     const r = await fetch('/api/lead/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
