@@ -191,15 +191,22 @@ class LeadResendReq(BaseModel):
 @app.post("/api/lead/preview")
 async def lead_preview(req: LeadPreviewReq, request: Request):
     ip = _ip_of(request)
-    if not db_mod.check_rate(ip, max_per_hour=5):
-        raise HTTPException(429, "Has excedido el límite de simulaciones por hora desde tu conexión. Intenta más tarde.")
 
     db_mod.track_event("preview_started", ip=ip,
                        user_agent=request.headers.get("user-agent",""),
                        payload={"area": req.area, "len": len(req.descripcion)})
 
+    # 1) Cache primero (no consume rate limit ni cuota Gemini)
+    area_auto = req.area or tl.detectar_area(req.descripcion)
+    hit = tl.cache_get(req.descripcion, area_auto)
     motor = get_motor()
-    res = tl.generar_borrador(motor, req.descripcion, area=req.area)
+    if hit:
+        res = dict(hit); res["cached"] = True
+    else:
+        # 2) Rate limit solo para queries NUEVAS (abuso real)
+        if not db_mod.check_rate(ip, max_per_hour=15):
+            raise HTTPException(429, "Has excedido el límite de simulaciones por hora desde esta conexión. Intenta en 1 hora o escríbenos por WhatsApp.")
+        res = tl.generar_borrador(motor, req.descripcion, area=req.area)
     if "error" in res:
         msg = res.get("user_message") or res["error"]
         code = 503 if res["error"] == "rate_limited" else 400
