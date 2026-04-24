@@ -363,6 +363,90 @@ def set_lawyer_availability(lid: int, available: bool) -> None:
         c.execute("UPDATE lawyers SET available=? WHERE id=?", (1 if available else 0, lid))
 
 
+# ── Schedule semanal del abogado ─────────────────────────────────────────────
+
+WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+DEFAULT_SCHEDULE = {
+    "mon": [["09:00", "12:00"], ["14:00", "17:00"]],
+    "tue": [["09:00", "12:00"], ["14:00", "17:00"]],
+    "wed": [["09:00", "12:00"], ["14:00", "17:00"]],
+    "thu": [["09:00", "12:00"], ["14:00", "17:00"]],
+    "fri": [["09:00", "12:00"], ["14:00", "17:00"]],
+    "sat": [],
+    "sun": [],
+}
+
+
+def get_lawyer_schedule(lid: int) -> dict:
+    """Retorna el schedule del abogado, o el default si no tiene configurado."""
+    with db() as c:
+        r = c.execute("SELECT schedule FROM lawyers WHERE id=?", (lid,)).fetchone()
+    if not r or not r["schedule"]:
+        return {k: list(v) for k, v in DEFAULT_SCHEDULE.items()}
+    try:
+        sched = json.loads(r["schedule"])
+        # Asegurar que están todas las claves
+        for k in WEEKDAY_KEYS:
+            if k not in sched: sched[k] = []
+        return sched
+    except Exception:
+        return {k: list(v) for k, v in DEFAULT_SCHEDULE.items()}
+
+
+def _validar_hora(s: str) -> Optional[tuple[int, int]]:
+    try:
+        h, m = s.split(":")
+        h, m = int(h), int(m)
+        if 0 <= h <= 24 and 0 <= m < 60:
+            return h, m
+    except Exception:
+        pass
+    return None
+
+
+def set_lawyer_schedule(lid: int, schedule: dict) -> dict:
+    """Valida y guarda el schedule del abogado. Retorna el schedule limpio."""
+    if not isinstance(schedule, dict):
+        raise ValueError("schedule debe ser un dict")
+    cleaned: dict[str, list[list[str]]] = {k: [] for k in WEEKDAY_KEYS}
+    for day, blocks in schedule.items():
+        if day not in WEEKDAY_KEYS:
+            continue
+        if not isinstance(blocks, list):
+            continue
+        rangos: list[tuple[int, int, int, int]] = []
+        for b in blocks:
+            if not (isinstance(b, list) and len(b) == 2):
+                continue
+            s_t = _validar_hora(b[0])
+            e_t = _validar_hora(b[1])
+            if not (s_t and e_t):
+                continue
+            sh, sm = s_t
+            eh, em = e_t
+            if (sh, sm) >= (eh, em):
+                continue
+            if eh > 23 or (eh == 23 and em > 59):
+                if not (eh == 24 and em == 0):
+                    continue
+            rangos.append((sh, sm, eh, em))
+        # Ordenar y mergear solapados
+        rangos.sort()
+        merged: list[tuple[int, int, int, int]] = []
+        for r in rangos:
+            if merged and (r[0], r[1]) <= (merged[-1][2], merged[-1][3]):
+                last = merged[-1]
+                merged[-1] = (last[0], last[1], max(last[2], r[2]), max(last[3], r[3]))
+            else:
+                merged.append(r)
+        cleaned[day] = [[f"{a:02d}:{b:02d}", f"{c:02d}:{d:02d}"] for a, b, c, d in merged]
+
+    with db() as c:
+        c.execute("UPDATE lawyers SET schedule=? WHERE id=?",
+                  (json.dumps(cleaned, ensure_ascii=False), lid))
+    return cleaned
+
+
 def lawyer_for_assignment(area: Optional[str]) -> Optional[dict]:
     """Como lawyer_for_area pero filtrando solo abogados disponibles."""
     with db() as c:
@@ -555,6 +639,8 @@ def _migrate() -> None:
             c.execute("ALTER TABLE lawyers ADD COLUMN password_salt TEXT")
         if "available" not in cols:
             c.execute("ALTER TABLE lawyers ADD COLUMN available INTEGER NOT NULL DEFAULT 1")
+        if "schedule" not in cols:
+            c.execute("ALTER TABLE lawyers ADD COLUMN schedule TEXT")
 
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────

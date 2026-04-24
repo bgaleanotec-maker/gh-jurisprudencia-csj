@@ -783,6 +783,51 @@ async def pro_patch_me(body: PatchMe, lawyer: dict = Depends(auth_mod.require_la
     return {"ok": True}
 
 
+# ── Schedule semanal del abogado (auto-gestión) ──────────────────────────────
+
+class ScheduleBody(BaseModel):
+    mon: list = []
+    tue: list = []
+    wed: list = []
+    thu: list = []
+    fri: list = []
+    sat: list = []
+    sun: list = []
+
+
+@app.get("/api/pro/me/schedule")
+async def pro_get_schedule(lawyer: dict = Depends(auth_mod.require_lawyer)):
+    return db_mod.get_lawyer_schedule(lawyer["id"])
+
+
+@app.put("/api/pro/me/schedule")
+async def pro_set_schedule(body: ScheduleBody, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    try:
+        cleaned = db_mod.set_lawyer_schedule(lawyer["id"], body.dict())
+        return {"ok": True, "schedule": cleaned}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+# Admin también puede ver/editar el schedule de cualquier abogado
+@app.get("/api/admin/lawyers/{lid}/schedule", dependencies=[Depends(admin_auth)])
+async def admin_get_schedule(lid: int):
+    if not db_mod.get_lawyer(lid):
+        raise HTTPException(404, "lawyer no encontrado")
+    return db_mod.get_lawyer_schedule(lid)
+
+
+@app.put("/api/admin/lawyers/{lid}/schedule", dependencies=[Depends(admin_auth)])
+async def admin_set_schedule(lid: int, body: ScheduleBody):
+    if not db_mod.get_lawyer(lid):
+        raise HTTPException(404, "lawyer no encontrado")
+    try:
+        cleaned = db_mod.set_lawyer_schedule(lid, body.dict())
+        return {"ok": True, "schedule": cleaned}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 # ── Agenda del abogado (calendar nativo) ─────────────────────────────────────
 
 @app.get("/api/pro/agenda")

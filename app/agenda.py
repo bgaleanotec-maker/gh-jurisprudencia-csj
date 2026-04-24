@@ -38,16 +38,39 @@ def _parse_dt(s: str) -> datetime:
     return dt.astimezone(TZ_BOGOTA)
 
 
+def _schedule_to_horarios(sched: dict) -> dict:
+    """{'mon':[['09:00','12:00'],...]} → {0: [(9,0,12,0),...], 1: [...], ...}"""
+    keys = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    out: dict[int, list[tuple[int,int,int,int]]] = {i: [] for i in range(7)}
+    for i, k in enumerate(keys):
+        blocks = sched.get(k, []) or []
+        for b in blocks:
+            try:
+                s_h, s_m = map(int, b[0].split(":"))
+                e_h, e_m = map(int, b[1].split(":"))
+                out[i].append((s_h, s_m, e_h, e_m))
+            except Exception:
+                pass
+    return out
+
+
 def slots_disponibles(lawyer_id: Optional[int],
                       dias_adelante: int = DEFAULT_DIAS_ADELANTE,
                       duracion_min: int = DEFAULT_DURACION_MIN,
-                      horarios=DEFAULT_HORARIO,
-                      dias_semana=DEFAULT_DIAS,
+                      horarios=None,
+                      dias_semana=None,
                       max_slots: int = 40) -> list[dict]:
     """
     Devuelve slots libres del abogado dado (o del calendario general si lawyer_id=None).
+    Usa el schedule personal del abogado si está configurado.
     """
     from app import db as db_mod
+
+    # Determinar horario por día (si tiene schedule en DB, usarlo)
+    horario_por_dia: Optional[dict[int, list]] = None
+    if lawyer_id:
+        sched = db_mod.get_lawyer_schedule(lawyer_id)
+        horario_por_dia = _schedule_to_horarios(sched)
 
     ahora = datetime.now(TZ_BOGOTA)
     fin = ahora + timedelta(days=dias_adelante)
@@ -92,21 +115,34 @@ def slots_disponibles(lawyer_id: Optional[int],
 
     slots = []
     start_cur = ahora.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    # Si no hay schedule personalizado, usar legacy (backwards compat)
+    legacy_horarios = horarios if horarios is not None else DEFAULT_HORARIO
+    legacy_dias = dias_semana if dias_semana is not None else DEFAULT_DIAS
+
     for off in range(dias_adelante + 1):
         dia = (start_cur + timedelta(days=off)).date()
-        if dia.weekday() not in dias_semana:
-            continue
-        for hi, hf in horarios:
-            for h in range(hi, hf):
-                for m in (0, 30) if duracion_min <= 30 else (0,):
-                    s = datetime(dia.year, dia.month, dia.day, h, m, tzinfo=TZ_BOGOTA)
-                    e = s + timedelta(minutes=duracion_min)
-                    if s <= ahora + timedelta(hours=1):
-                        continue
-                    if e.hour > hf or (e.hour == hf and e.minute > 0):
-                        continue
-                    if colisiona(s, e):
-                        continue
+        wd = dia.weekday()
+        # Bloques del día según schedule personal o legacy
+        if horario_por_dia is not None:
+            bloques = horario_por_dia.get(wd, [])
+            if not bloques:
+                continue
+        else:
+            if wd not in legacy_dias:
+                continue
+            bloques = [(hi, 0, hf, 0) for hi, hf in legacy_horarios]
+
+        for sh, sm, eh, em in bloques:
+            ini_min = sh * 60 + sm
+            fin_min = eh * 60 + em
+            step = duracion_min if duracion_min > 30 else 30
+            t = ini_min
+            while t + duracion_min <= fin_min:
+                h_local = t // 60
+                m_local = t % 60
+                s = datetime(dia.year, dia.month, dia.day, h_local, m_local, tzinfo=TZ_BOGOTA)
+                e = s + timedelta(minutes=duracion_min)
+                if s > ahora + timedelta(hours=1) and not colisiona(s, e):
                     slots.append({
                         "start": s.isoformat(),
                         "end":   e.isoformat(),
@@ -114,6 +150,7 @@ def slots_disponibles(lawyer_id: Optional[int],
                     })
                     if len(slots) >= max_slots:
                         return slots
+                t += step
     return slots
 
 
@@ -167,39 +204,57 @@ def semana_del_abogado(lawyer_id: int, start_date: Optional[str] = None,
             "reason": b["reason"] or "",
         })
 
-    # Generar rejilla de slots
+    # Schedule del abogado: { weekday: [(sh,sm,eh,em),...] }
+    sched = db_mod.get_lawyer_schedule(lawyer_id)
+    horario_por_dia = _schedule_to_horarios(sched)
+
+    # Para mostrar TODAS las horas del día y diferenciar "off_hours" del resto,
+    # determinamos el rango global (mín y máx que aparezca en cualquier día)
+    todos = [b for blocks in horario_por_dia.values() for b in blocks]
+    if todos:
+        h_min = min((b[0]*60 + b[1]) for b in todos) // 60
+        h_max_min = max((b[2]*60 + b[3]) for b in todos)
+        h_max = (h_max_min + (60 - h_max_min % 60 if h_max_min % 60 else 0)) // 60
+    else:
+        h_min, h_max = 9, 17
+
     ahora = datetime.now(TZ_BOGOTA)
     dias = []
     for d in range(7):
         dia = base + timedelta(days=d)
         slots_dia = []
-        for hi, hf in horarios:
-            for h in range(hi, hf):
-                for m in (0, 30) if duracion_min <= 30 else (0,):
-                    s = datetime(dia.year, dia.month, dia.day, h, m, tzinfo=TZ_BOGOTA)
-                    e = s + timedelta(minutes=duracion_min)
-                    estado = "free"
-                    item = None
-                    if dia.weekday() not in DEFAULT_DIAS:
-                        estado = "off_hours"
-                    elif s < ahora:
-                        estado = "past"
-                    else:
-                        for it in appt_items:
-                            ist = _parse_dt(it["start"]); ien = _parse_dt(it["end"])
-                            if s < ien and ist < e:
-                                estado = "booked" if it["status"] == "scheduled" else it["status"]
-                                item = it; break
-                        if estado == "free":
-                            for bl in block_items:
-                                bst = _parse_dt(bl["start"]); ben = _parse_dt(bl["end"])
-                                if s < ben and bst < e:
-                                    estado = "blocked"; item = bl; break
-                    slots_dia.append({
-                        "start": s.isoformat(), "end": e.isoformat(),
-                        "hour": s.strftime("%H:%M"),
-                        "state": estado, "item": item,
-                    })
+        bloques_dia = horario_por_dia.get(dia.weekday(), [])
+        for h in range(h_min, h_max):
+            for m in (0, 30) if duracion_min <= 30 else (0,):
+                s = datetime(dia.year, dia.month, dia.day, h, m, tzinfo=TZ_BOGOTA)
+                e = s + timedelta(minutes=duracion_min)
+                # ¿está dentro de algún bloque del día?
+                t_min_s = h*60 + m
+                t_min_e = t_min_s + duracion_min
+                en_bloque = any(
+                    (sh*60+sm) <= t_min_s and t_min_e <= (eh*60+em)
+                    for sh, sm, eh, em in bloques_dia
+                )
+                estado = "free" if en_bloque else "off_hours"
+                item = None
+                if estado == "free" and s < ahora:
+                    estado = "past"
+                if estado == "free":
+                    for it in appt_items:
+                        ist = _parse_dt(it["start"]); ien = _parse_dt(it["end"])
+                        if s < ien and ist < e:
+                            estado = "booked" if it["status"] == "scheduled" else it["status"]
+                            item = it; break
+                if estado == "free":
+                    for bl in block_items:
+                        bst = _parse_dt(bl["start"]); ben = _parse_dt(bl["end"])
+                        if s < ben and bst < e:
+                            estado = "blocked"; item = bl; break
+                slots_dia.append({
+                    "start": s.isoformat(), "end": e.isoformat(),
+                    "hour": s.strftime("%H:%M"),
+                    "state": estado, "item": item,
+                })
         dias.append({
             "date": dia.strftime("%Y-%m-%d"),
             "label": dia.strftime("%a %d"),

@@ -1346,6 +1346,24 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
   .spinner{display:none;text-align:center;padding:14px;color:#002347;font-size:13px;}
   .spinner.on{display:block;}
   .badge-fch{background:#e3f0ff;color:#004a9f;padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700;margin:2px;display:inline-block;}
+  /* SCHEDULE editor */
+  .schedule-grid{display:flex;flex-direction:column;gap:8px;}
+  .sch-day{display:grid;grid-template-columns:120px 80px 1fr;gap:12px;align-items:start;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;}
+  @media(max-width:680px){.sch-day{grid-template-columns:1fr;gap:8px;}}
+  .sch-day .dn{font-weight:700;color:#002347;font-size:14px;text-transform:capitalize;padding-top:8px;}
+  .sch-day .toggle-cell{display:flex;align-items:center;gap:8px;padding-top:6px;}
+  .sch-day .toggle-cell .lbl{font-size:11px;color:#6b7280;font-weight:600;}
+  .sch-blocks{display:flex;flex-direction:column;gap:6px;}
+  .sch-block{display:flex;align-items:center;gap:8px;background:#f6f8fb;padding:8px 12px;border-radius:6px;}
+  .sch-block input[type=time]{width:100px;padding:6px 8px;border:1px solid #dce3ef;border-radius:5px;font-size:13px;}
+  .sch-block .sep{color:#6b7280;font-size:13px;}
+  .sch-block .rm{background:transparent;border:none;color:#c8102e;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;}
+  .sch-block .rm:hover{color:#9a0d22;}
+  .sch-add{align-self:flex-start;background:transparent;border:1px dashed #C5A059;color:#002347;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;}
+  .sch-add:hover{background:#fefae8;}
+  .sch-day.off{opacity:.55;}
+  .sch-day.off .sch-blocks{display:none;}
+
   /* Meta diaria gamificada */
   .goal-card{background:linear-gradient(135deg,#002347 0%,#003f7a 100%);color:#fff;padding:20px 24px;border-radius:12px;margin-bottom:18px;position:relative;overflow:hidden;}
   .goal-card::after{content:'';position:absolute;top:0;right:0;width:180px;height:100%;background:radial-gradient(circle,rgba(197,160,89,.2) 0%,transparent 70%);}
@@ -1426,6 +1444,7 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
     <div class="tab on" onclick="tab('agenda')">📅 Agenda</div>
     <div class="tab" onclick="tab('leads')">👥 Mis Leads</div>
     <div class="tab" onclick="tab('rag')">⚖ Asistente Jurídico</div>
+    <div class="tab" onclick="tab('horario')">⏰ Horario</div>
     <div class="tab" onclick="tab('config')">🔧 Cuenta</div>
   </div>
 
@@ -1481,6 +1500,38 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
     <div class="fuentes" id="rag-fuentes"></div>
   </div>
 
+  <!-- HORARIO -->
+  <div class="panel" id="p-horario">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:18px">
+      <div>
+        <h3 style="color:#002347;margin-bottom:4px">⏰ Mi horario disponible</h3>
+        <div style="font-size:13px;color:#6b7280">Define en qué días y franjas horarias quieres aparecer disponible para que los clientes te agenden citas.</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm outline" onclick="aplicarPlantilla('manana')">Solo mañanas (8-12)</button>
+        <button class="btn btn-sm outline" onclick="aplicarPlantilla('tarde')">Solo tardes (14-18)</button>
+        <button class="btn btn-sm outline" onclick="aplicarPlantilla('jornada')">Jornada L-V (8-17)</button>
+        <button class="btn btn-sm outline" onclick="aplicarPlantilla('full')">L-S (9-18)</button>
+        <button class="btn btn-sm outline" onclick="aplicarPlantilla('clear')" style="color:#c8102e;border-color:#c8102e">Sin atención</button>
+      </div>
+    </div>
+
+    <div id="schedule-grid" class="schedule-grid"></div>
+
+    <div style="display:flex;gap:10px;align-items:center;margin-top:18px;padding:14px;background:#f6f8fb;border-radius:8px">
+      <label class="switch"><input type="checkbox" id="sch-copy-lv"><span class="slider"></span></label>
+      <span style="font-size:13px;color:#374151">Al editar lunes, copiar la misma franja a martes-viernes automáticamente</span>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;flex-wrap:wrap;gap:10px">
+      <div id="sch-msg" style="font-size:13px;color:#6b7280"></div>
+      <div style="display:flex;gap:10px">
+        <button class="btn outline" onclick="cargarHorario()">Descartar cambios</button>
+        <button class="btn green" onclick="guardarHorario()">💾 Guardar horario</button>
+      </div>
+    </div>
+  </div>
+
   <!-- CONFIG -->
   <div class="panel" id="p-config">
     <h3 style="margin-bottom:14px;color:#002347">Datos de mi cuenta</h3>
@@ -1514,6 +1565,122 @@ function tab(name){
   if(name==='leads')loadLeads();
   if(name==='agenda'){loadCal(); loadAppts();}
   if(name==='config')loadMe();
+  if(name==='horario')cargarHorario();
+}
+
+// ─── Schedule editor ─────────────────────────────────────────────────────
+const DIAS_NOMBRE = {mon:'Lunes',tue:'Martes',wed:'Miércoles',thu:'Jueves',fri:'Viernes',sat:'Sábado',sun:'Domingo'};
+const DIAS_KEYS = ['mon','tue','wed','thu','fri','sat','sun'];
+let _schedState = null;
+
+async function cargarHorario(){
+  const sched = await api('/api/pro/me/schedule');
+  _schedState = JSON.parse(JSON.stringify(sched));
+  // garantizar todas las claves
+  DIAS_KEYS.forEach(k=>{ if(!_schedState[k]) _schedState[k] = []; });
+  renderHorario();
+  document.getElementById('sch-msg').textContent = '';
+}
+
+function renderHorario(){
+  const grid = document.getElementById('schedule-grid');
+  grid.innerHTML = DIAS_KEYS.map(k=>{
+    const blocks = _schedState[k] || [];
+    const off = blocks.length === 0;
+    return `<div class="sch-day ${off?'off':''}" data-day="${k}">
+      <div class="dn">${DIAS_NOMBRE[k]}</div>
+      <div class="toggle-cell">
+        <label class="switch"><input type="checkbox" ${off?'':'checked'} onchange="toggleDia('${k}', this.checked)"><span class="slider"></span></label>
+        <span class="lbl">${off?'Cerrado':'Abierto'}</span>
+      </div>
+      <div class="sch-blocks">
+        ${blocks.map((b,i)=>renderBlock(k,i,b)).join('')}
+        <button class="sch-add" onclick="agregarFranja('${k}')">+ Añadir franja</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderBlock(day, idx, b){
+  return `<div class="sch-block">
+    <input type="time" value="${b[0]}" onchange="actualizarBlock('${day}',${idx},0,this.value)">
+    <span class="sep">→</span>
+    <input type="time" value="${b[1]}" onchange="actualizarBlock('${day}',${idx},1,this.value)">
+    <button class="rm" title="Quitar franja" onclick="quitarFranja('${day}',${idx})">×</button>
+  </div>`;
+}
+
+function toggleDia(day, abierto){
+  if(abierto && (!_schedState[day] || !_schedState[day].length)){
+    _schedState[day] = [['09:00','12:00']];
+  } else if(!abierto){
+    _schedState[day] = [];
+  }
+  renderHorario();
+}
+
+function agregarFranja(day){
+  if(!_schedState[day]) _schedState[day] = [];
+  let s = '14:00', e = '17:00';
+  if(_schedState[day].length){
+    const ult = _schedState[day][_schedState[day].length-1];
+    const [h] = ult[1].split(':').map(Number);
+    const start = h+1;
+    if(start < 22){ s = String(start).padStart(2,'0')+':00'; e = String(Math.min(start+3,23)).padStart(2,'0')+':00'; }
+  }
+  _schedState[day].push([s,e]);
+  renderHorario();
+}
+
+function quitarFranja(day, idx){
+  _schedState[day].splice(idx,1);
+  renderHorario();
+}
+
+function actualizarBlock(day, idx, pos, val){
+  if(!_schedState[day] || !_schedState[day][idx]) return;
+  _schedState[day][idx][pos] = val;
+  if(day === 'mon' && document.getElementById('sch-copy-lv')?.checked){
+    ['tue','wed','thu','fri'].forEach(d=>{
+      _schedState[d] = JSON.parse(JSON.stringify(_schedState['mon']));
+    });
+    renderHorario();
+  }
+}
+
+function aplicarPlantilla(tipo){
+  const empty = ()=>({mon:[],tue:[],wed:[],thu:[],fri:[],sat:[],sun:[]});
+  let s = empty();
+  if(tipo === 'manana'){
+    ['mon','tue','wed','thu','fri'].forEach(d=>s[d] = [['08:00','12:00']]);
+  } else if(tipo === 'tarde'){
+    ['mon','tue','wed','thu','fri'].forEach(d=>s[d] = [['14:00','18:00']]);
+  } else if(tipo === 'jornada'){
+    ['mon','tue','wed','thu','fri'].forEach(d=>s[d] = [['08:00','12:00'],['14:00','17:00']]);
+  } else if(tipo === 'full'){
+    ['mon','tue','wed','thu','fri','sat'].forEach(d=>s[d] = [['09:00','13:00'],['14:00','18:00']]);
+  } else if(tipo === 'clear'){
+    s = empty();
+  }
+  _schedState = s;
+  renderHorario();
+  document.getElementById('sch-msg').textContent = '✏️ Plantilla aplicada — recuerda guardar.';
+}
+
+async function guardarHorario(){
+  try{
+    const r = await api('/api/pro/me/schedule',{method:'PUT',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify(_schedState)});
+    _schedState = r.schedule;
+    DIAS_KEYS.forEach(k=>{ if(!_schedState[k]) _schedState[k] = []; });
+    renderHorario();
+    document.getElementById('sch-msg').innerHTML = '<span style="color:#16a34a">✅ Horario guardado. Los clientes verán estos slots desde ya.</span>';
+    setTimeout(()=>{document.getElementById('sch-msg').textContent='';}, 5000);
+    // recargar agenda si estaba abierta
+    if(typeof loadCal === 'function') loadCal();
+  }catch(e){
+    document.getElementById('sch-msg').innerHTML = '<span style="color:#c8102e">❌ '+e.message+'</span>';
+  }
 }
 
 async function loadMe(){
@@ -2319,6 +2486,39 @@ def admin_html() -> str:
   .actions{display:flex;gap:6px;flex-wrap:wrap;}
   .truncate{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:280px;}
   .pwd-cell{font-family:monospace;font-size:11px;background:#fef3c7;padding:2px 6px;border-radius:3px;cursor:pointer;}
+
+  /* Modal */
+  .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;align-items:center;justify-content:center;padding:20px;}
+  .modal-bg.on{display:flex;animation:fadeIn .2s;}
+  .modal{background:#fff;max-width:600px;width:100%;max-height:88vh;overflow-y:auto;border-radius:12px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.4);position:relative;animation:slideUp .25s;}
+  .modal-close{position:absolute;top:14px;right:18px;cursor:pointer;color:#9ca3af;font-size:26px;line-height:1;background:none;border:none;}
+  .modal-close:hover{color:#002347;}
+  @keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
+  @keyframes slideUp{from{transform:translateY(20px);opacity:0;}to{transform:none;opacity:1;}}
+
+  /* Switch */
+  .switch{position:relative;display:inline-block;width:42px;height:22px;flex-shrink:0;}
+  .switch input{opacity:0;width:0;height:0;}
+  .slider{position:absolute;cursor:pointer;inset:0;background:#cbd5e1;transition:.2s;border-radius:22px;}
+  .slider:before{position:absolute;content:"";height:16px;width:16px;left:3px;bottom:3px;background:#fff;transition:.2s;border-radius:50%;}
+  input:checked + .slider{background:#16a34a;}
+  input:checked + .slider:before{transform:translateX(20px);}
+
+  /* Schedule editor (mismo estilo que en pro dashboard) */
+  .schedule-grid{display:flex;flex-direction:column;gap:8px;}
+  .sch-day{display:grid;grid-template-columns:110px 70px 1fr;gap:12px;align-items:start;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;}
+  @media(max-width:680px){.sch-day{grid-template-columns:1fr;gap:8px;}}
+  .sch-day .dn{font-weight:700;color:#002347;font-size:14px;padding-top:6px;}
+  .sch-day .toggle-cell{display:flex;align-items:center;gap:6px;padding-top:4px;}
+  .sch-day .toggle-cell .lbl{font-size:11px;color:#6b7280;font-weight:600;}
+  .sch-blocks{display:flex;flex-direction:column;gap:6px;}
+  .sch-block{display:flex;align-items:center;gap:8px;background:#f6f8fb;padding:8px 12px;border-radius:6px;}
+  .sch-block input[type=time]{width:100px;padding:6px 8px;border:1px solid #dce3ef;border-radius:5px;font-size:13px;}
+  .sch-block .sep{color:#6b7280;font-size:13px;}
+  .sch-block .rm{background:transparent;border:none;color:#c8102e;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;}
+  .sch-add{align-self:flex-start;background:transparent;border:1px dashed #C5A059;color:#002347;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;}
+  .sch-day.off{opacity:.55;}
+  .sch-day.off .sch-blocks{display:none;}
 </style></head>
 <body>
 
@@ -2368,18 +2568,83 @@ def admin_html() -> str:
   </div>
 
   <div class="panel" id="p-lawyers">
-    <h3 style="margin-bottom:14px;color:#002347">Abogados que reciben leads</h3>
-    <div class="form-row">
-      <div><label>Nombre</label><input id="l-name" placeholder="Dr. Galeano"></div>
-      <div><label>WhatsApp</label><input id="l-wa" placeholder="573001234567"></div>
-      <div><label>Email (login)</label><input id="l-email" type="email" placeholder="abogado@galeano.co"></div>
-      <div><label>Password inicial</label><input id="l-pwd" type="text" placeholder="(autogenerado si vacío)"></div>
-      <div><label>Áreas (* = todas)</label><input id="l-areas" placeholder="salud,laboral o *"></div>
-      <div><button class="btn green" onclick="addLawyer()">+ Agregar</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h3 style="color:#002347;margin-bottom:4px">⚖ Abogados que reciben leads</h3>
+        <div style="font-size:12px;color:#6b7280">Crea, edita el horario y desactiva abogados.</div>
+      </div>
+      <button class="btn green" onclick="abrirModalNuevoAbogado()">+ Nuevo abogado</button>
     </div>
     <table id="t-lawyers"><thead><tr>
-      <th>Nombre</th><th>Email</th><th>WhatsApp</th><th>Áreas</th><th>Default</th><th>Activo</th><th>Disp</th><th></th>
+      <th>Nombre</th><th>Email · Login</th><th>WhatsApp</th><th>Áreas</th><th>Default</th><th>Activo</th><th>Disp</th><th>Acciones</th>
     </tr></thead><tbody></tbody></table>
+  </div>
+
+  <!-- Modal: Nuevo abogado -->
+  <div class="modal-bg" id="m-new-lawyer">
+    <div class="modal" style="max-width:560px">
+      <span class="modal-close" onclick="cerrarModales()">×</span>
+      <h3 style="color:#002347;margin-bottom:6px">Nuevo abogado</h3>
+      <div style="font-size:13px;color:#6b7280;margin-bottom:18px">El abogado podrá iniciar sesión en <code>/pro/login</code> con el email y password que aquí defines.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Nombre completo *</label><input id="m-l-name" placeholder="Dr. Juan Pérez" autofocus></div>
+        <div><label>WhatsApp *</label><input id="m-l-wa" placeholder="573001234567" inputmode="numeric"></div>
+        <div><label>Email (login) *</label><input id="m-l-email" type="email" placeholder="juan@galeano.co"></div>
+        <div>
+          <label>Password inicial</label>
+          <div style="display:flex;gap:6px">
+            <input id="m-l-pwd" type="text" placeholder="(autogenerar)" style="flex:1">
+            <button type="button" class="btn btn-sm outline" onclick="genPassword()" title="Generar password seguro">🎲</button>
+          </div>
+        </div>
+        <div style="grid-column:1/3"><label>Áreas que atiende (separadas por coma · * = todas)</label>
+          <input id="m-l-areas" placeholder="salud, laboral · o solamente *" value="*"></div>
+        <div style="grid-column:1/3;display:flex;gap:14px;align-items:center;background:#f6f8fb;padding:10px 14px;border-radius:6px">
+          <label class="switch"><input type="checkbox" id="m-l-default"><span class="slider"></span></label>
+          <span style="font-size:13px;color:#374151">Marcar como abogado por defecto (recibe leads sin área específica)</span>
+        </div>
+      </div>
+      <div id="m-l-error" style="margin-top:12px;font-size:13px;color:#c8102e"></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+        <button class="btn outline" onclick="cerrarModales()">Cancelar</button>
+        <button class="btn green" onclick="guardarNuevoAbogado()">💾 Crear abogado</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Mostrar credenciales tras crear -->
+  <div class="modal-bg" id="m-creds">
+    <div class="modal" style="max-width:520px;text-align:center">
+      <div style="font-size:48px;margin-bottom:8px">✅</div>
+      <h3 style="color:#002347">Abogado creado</h3>
+      <p style="font-size:13px;color:#6b7280;margin:8px 0 18px">Estas son las credenciales. Cópialas ahora — la password no se vuelve a mostrar.</p>
+      <div style="background:#f6f8fb;padding:18px;border-radius:8px;text-align:left">
+        <div style="margin-bottom:10px"><b style="font-size:11px;text-transform:uppercase;color:#6b7280">URL</b><br>
+          <code id="cred-url" style="font-size:13px"></code></div>
+        <div style="margin-bottom:10px"><b style="font-size:11px;text-transform:uppercase;color:#6b7280">Email</b><br>
+          <code id="cred-email" style="font-size:13px"></code></div>
+        <div><b style="font-size:11px;text-transform:uppercase;color:#6b7280">Password</b><br>
+          <code id="cred-pwd" style="font-size:15px;background:#fef3c7;padding:3px 8px;border-radius:3px"></code></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;justify-content:center;flex-wrap:wrap">
+        <button class="btn green" onclick="copiarCreds()">📋 Copiar credenciales</button>
+        <button class="btn outline" onclick="cerrarModales();loadLawyers()">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Editor de horario por abogado -->
+  <div class="modal-bg" id="m-sched">
+    <div class="modal" style="max-width:760px">
+      <span class="modal-close" onclick="cerrarModales()">×</span>
+      <h3 style="color:#002347;margin-bottom:6px" id="m-sched-title">Horario del abogado</h3>
+      <div style="font-size:13px;color:#6b7280;margin-bottom:14px">Define en qué días y franjas atenderá citas.</div>
+      <div id="m-sched-grid" class="schedule-grid"></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+        <button class="btn outline" onclick="cerrarModales()">Cancelar</button>
+        <button class="btn green" onclick="guardarHorarioModal()">💾 Guardar horario</button>
+      </div>
+    </div>
   </div>
 
   <div class="panel" id="p-config">
@@ -2483,36 +2748,80 @@ async function loadLawyers(){
   document.querySelector('#t-lawyers tbody').innerHTML=data.map(l=>`
     <tr>
       <td><b>${l.name}</b></td>
-      <td>${l.email||'<i style="color:#aaa">sin login</i>'}</td>
+      <td>${l.email?`<code style="font-size:12px">${l.email}</code>`:'<i style="color:#aaa">sin login</i>'}</td>
       <td><a href="https://wa.me/${l.whatsapp}" target="_blank">+${l.whatsapp}</a></td>
       <td>${(l.areas||[]).join(', ')||'—'}</td>
       <td>${l.is_default?'⭐':''}</td>
       <td>${l.active?'✓':'—'}</td>
       <td><button class="btn btn-sm outline" onclick="toggleAvail(${l.id},${l.available?0:1})">${l.available?'On':'Off'}</button></td>
-      <td>
-        <button class="btn btn-sm outline" onclick="resetPwd(${l.id})">Reset pass</button>
+      <td><div class="actions">
+        <button class="btn btn-sm outline" onclick="abrirHorario(${l.id},'${(l.name||'').replace(/'/g,'')}')">⏰ Horario</button>
+        <button class="btn btn-sm outline" onclick="resetPwd(${l.id})">🔑 Reset</button>
         <button class="btn btn-sm" style="background:#c8102e" onclick="delLawyer(${l.id})">×</button>
-      </td>
-    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#888;padding:20px">Sin abogados</td></tr>';
+      </div></td>
+    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;color:#888;padding:30px">Sin abogados aún. Crea uno arriba.</td></tr>';
 }
-async function addLawyer(){
-  const data={
-    name: document.getElementById('l-name').value.trim(),
-    whatsapp: document.getElementById('l-wa').value.trim(),
-    email: document.getElementById('l-email').value.trim() || null,
-    password: document.getElementById('l-pwd').value.trim() || null,
-    areas: document.getElementById('l-areas').value.split(',').map(s=>s.trim()).filter(Boolean),
-    is_default: false,
-  };
-  if(!data.name||!data.whatsapp){alert('Nombre y WhatsApp son obligatorios');return;}
-  if(!data.password && data.email){
-    data.password = Math.random().toString(36).slice(-10);
-    alert('Password autogenerado para '+data.email+': '+data.password+'\\n\\nGUÁRDALO ahora — no se vuelve a mostrar.');
-  }
-  await api('/api/admin/lawyers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-  ['l-name','l-wa','l-email','l-pwd','l-areas'].forEach(id=>document.getElementById(id).value='');
-  loadLawyers();
+
+// ─── Modal Nuevo abogado ────────────────────────────────────────────
+function abrirModalNuevoAbogado(){
+  ['m-l-name','m-l-wa','m-l-email','m-l-pwd'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('m-l-areas').value = '*';
+  document.getElementById('m-l-default').checked = false;
+  document.getElementById('m-l-error').textContent = '';
+  document.getElementById('m-new-lawyer').classList.add('on');
+  setTimeout(()=>document.getElementById('m-l-name').focus(), 150);
 }
+function cerrarModales(){
+  document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('on'));
+}
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape') cerrarModales(); });
+document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)cerrarModales();}));
+
+function genPassword(){
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let pw = '';
+  for(let i=0;i<12;i++) pw += chars[Math.floor(Math.random()*chars.length)];
+  document.getElementById('m-l-pwd').value = pw;
+}
+
+async function guardarNuevoAbogado(){
+  const errBox = document.getElementById('m-l-error');
+  errBox.textContent = '';
+  const name = document.getElementById('m-l-name').value.trim();
+  const wa = document.getElementById('m-l-wa').value.trim();
+  const email = document.getElementById('m-l-email').value.trim().toLowerCase();
+  let pwd = document.getElementById('m-l-pwd').value.trim();
+  const areasRaw = document.getElementById('m-l-areas').value.trim();
+  const isDefault = document.getElementById('m-l-default').checked;
+
+  if(!name || !wa || !email){ errBox.textContent='Nombre, WhatsApp y email son obligatorios.'; return; }
+  if(!email.includes('@')){ errBox.textContent='Email inválido.'; return; }
+  if(!pwd){ genPassword(); pwd = document.getElementById('m-l-pwd').value.trim(); }
+
+  const areas = areasRaw.split(',').map(s=>s.trim()).filter(Boolean);
+  try{
+    const r = await api('/api/admin/lawyers',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name, whatsapp:wa, email, password:pwd, areas, is_default:isDefault})});
+    cerrarModales();
+    // Mostrar credenciales
+    document.getElementById('cred-url').textContent = location.origin + '/pro/login';
+    document.getElementById('cred-email').textContent = email;
+    document.getElementById('cred-pwd').textContent = pwd;
+    document.getElementById('m-creds').classList.add('on');
+  }catch(e){ errBox.textContent = e.message; }
+}
+
+function copiarCreds(){
+  const txt = `Galeano Herrera | Abogados\nAcceso pro:\n  URL: ${document.getElementById('cred-url').textContent}\n  Email: ${document.getElementById('cred-email').textContent}\n  Password: ${document.getElementById('cred-pwd').textContent}`;
+  navigator.clipboard.writeText(txt).then(()=>{
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copiado'; btn.style.background = '#15803d';
+    setTimeout(()=>{btn.textContent = orig; btn.style.background = '';}, 2000);
+  });
+}
+
 async function resetPwd(id){
   const p = prompt('Nueva contraseña para este abogado:');
   if(!p)return;
@@ -2524,9 +2833,67 @@ async function toggleAvail(id, val){
   loadLawyers();
 }
 async function delLawyer(id){
-  if(!confirm('¿Eliminar este abogado?'))return;
+  if(!confirm('¿Eliminar este abogado? Esta acción no se puede deshacer.'))return;
   await api('/api/admin/lawyers/'+id,{method:'DELETE'});
   loadLawyers();
+}
+
+// ─── Modal Horario por abogado (admin) ──────────────────────────────
+const DIAS_NOMBRE = {mon:'Lunes',tue:'Martes',wed:'Miércoles',thu:'Jueves',fri:'Viernes',sat:'Sábado',sun:'Domingo'};
+const DIAS_KEYS = ['mon','tue','wed','thu','fri','sat','sun'];
+let _admSchedState = null;
+let _admSchedLawyerId = null;
+
+async function abrirHorario(lid, name){
+  _admSchedLawyerId = lid;
+  document.getElementById('m-sched-title').textContent = '⏰ Horario · ' + name;
+  const sched = await api('/api/admin/lawyers/'+lid+'/schedule');
+  _admSchedState = JSON.parse(JSON.stringify(sched));
+  DIAS_KEYS.forEach(k=>{ if(!_admSchedState[k]) _admSchedState[k] = []; });
+  renderAdmSched();
+  document.getElementById('m-sched').classList.add('on');
+}
+
+function renderAdmSched(){
+  const grid = document.getElementById('m-sched-grid');
+  grid.innerHTML = DIAS_KEYS.map(k=>{
+    const blocks = _admSchedState[k] || [];
+    const off = blocks.length === 0;
+    return `<div class="sch-day ${off?'off':''}">
+      <div class="dn">${DIAS_NOMBRE[k]}</div>
+      <div class="toggle-cell">
+        <label class="switch"><input type="checkbox" ${off?'':'checked'} onchange="admToggleDia('${k}',this.checked)"><span class="slider"></span></label>
+      </div>
+      <div class="sch-blocks">
+        ${blocks.map((b,i)=>`<div class="sch-block">
+          <input type="time" value="${b[0]}" onchange="admUpdateBlock('${k}',${i},0,this.value)">
+          <span class="sep">→</span>
+          <input type="time" value="${b[1]}" onchange="admUpdateBlock('${k}',${i},1,this.value)">
+          <button class="rm" onclick="admRemoveBlock('${k}',${i})">×</button>
+        </div>`).join('')}
+        <button class="sch-add" onclick="admAddBlock('${k}')">+ Añadir franja</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function admToggleDia(d, on){ _admSchedState[d] = on ? [['09:00','12:00']] : []; renderAdmSched(); }
+function admAddBlock(d){
+  const last = _admSchedState[d]?.slice(-1)[0];
+  let s = '14:00', e = '17:00';
+  if(last){ const [h] = last[1].split(':').map(Number); if(h+1 < 22){ s = String(h+1).padStart(2,'0')+':00'; e = String(Math.min(h+4,23)).padStart(2,'0')+':00'; } }
+  (_admSchedState[d] = _admSchedState[d] || []).push([s,e]); renderAdmSched();
+}
+function admRemoveBlock(d,i){ _admSchedState[d].splice(i,1); renderAdmSched(); }
+function admUpdateBlock(d,i,p,v){ if(_admSchedState[d]?.[i]) _admSchedState[d][i][p] = v; }
+
+async function guardarHorarioModal(){
+  try{
+    await api('/api/admin/lawyers/'+_admSchedLawyerId+'/schedule',{method:'PUT',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify(_admSchedState)});
+    cerrarModales();
+    alert('✓ Horario guardado');
+  }catch(e){ alert('Error: '+e.message); }
 }
 async function loadConfig(){
   const c=await api('/api/admin/config');
