@@ -2810,19 +2810,28 @@ def admin_html() -> str:
     <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;margin-bottom:14px">
       <div>
         <h3 style="color:#002347;margin-bottom:4px">🧠 Cerebro RAG · Documentos cargados</h3>
-        <div style="font-size:13px;color:#6b7280">Sube PDFs de sentencias, leyes, doctrina o piezas procesales. La IA los transformará automáticamente y, una vez aprobados, alimentarán el motor de búsqueda jurídica.</div>
+        <div style="font-size:13px;color:#6b7280">Sube miles de PDFs en modo rápido (sin gastar IA). Cuando quieras, enriquece por lotes para extraer sala/radicado/temas/tesis con Gemini.</div>
       </div>
-      <button class="btn outline" onclick="adminReindexarRAG()">🔄 Reindexar todo</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn green" onclick="enriquecerLote(10)">🤖 Enriquecer 10 con IA</button>
+        <button class="btn outline" onclick="enriquecerLote(50)">🤖 Enriquecer 50 con IA</button>
+        <button class="btn outline" onclick="adminReindexarRAG()">🔄 Reindexar todo</button>
+      </div>
     </div>
 
     <div id="cerebro-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px"></div>
 
-    <!-- Drag & drop -->
+    <!-- Drag & drop con elección de modo -->
     <div class="dropzone" id="dropzone-admin">
-      <input type="file" id="file-input-admin" multiple accept="application/pdf" style="display:none" onchange="adminUploadFiles(this.files)">
+      <input type="file" id="file-input-admin" multiple accept="application/pdf" style="display:none" onchange="adminUploadFiles(this.files, false)">
+      <input type="file" id="file-input-admin-ai" multiple accept="application/pdf" style="display:none" onchange="adminUploadFiles(this.files, true)">
       <div class="dz-icon">📤</div>
       <div class="dz-title">Arrastra PDFs aquí o haz click para seleccionar</div>
-      <div class="dz-sub">Sentencias, leyes, doctrina, piezas procesales — máx. 25 MB c/u</div>
+      <div class="dz-sub">Modo rápido por default · 25 MB c/u · Bulk masivo soportado</div>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap">
+        <button class="btn outline btn-sm" type="button" onclick="event.stopPropagation();document.getElementById('file-input-admin').click()">⚡ Subida rápida (sin IA)</button>
+        <button class="btn green btn-sm" type="button" onclick="event.stopPropagation();document.getElementById('file-input-admin-ai').click()">🤖 Subida + enriquecimiento IA</button>
+      </div>
     </div>
     <div id="upload-progress-admin"></div>
 
@@ -2942,23 +2951,28 @@ async function loadRagDocs(){
   dz.addEventListener('drop', ev=>{ adminUploadFiles(ev.dataTransfer.files); });
 })();
 
-async function adminUploadFiles(filelist){
+async function adminUploadFiles(filelist, enriquecer){
   if(!filelist || !filelist.length) return;
   const cont = document.getElementById('upload-progress-admin');
   cont.innerHTML = '';
   const fd = new FormData();
   for(const f of filelist){
     fd.append('files', f);
-    cont.innerHTML += `<div class="upload-row" id="up-${f.name.replace(/\W/g,'_')}">📄 ${f.name} · subiendo y transformando con IA…</div>`;
+    const accion = enriquecer ? 'extrayendo texto + IA…' : 'extrayendo texto (modo rápido)…';
+    cont.innerHTML += `<div class="upload-row" id="up-${f.name.replace(/\W/g,'_')}">📄 ${f.name} · ${accion}</div>`;
   }
   try{
-    const r = await fetch('/api/admin/rag/upload',{method:'POST',body:fd});
+    const url = '/api/admin/rag/upload' + (enriquecer ? '?enriquecer=true' : '');
+    const r = await fetch(url, {method:'POST',body:fd});
     const d = await r.json();
     if(!r.ok) throw new Error(d.detail||'Error');
     cont.innerHTML = d.results.map(res=>{
       const cls = res.ok ? 'ok' : 'err';
+      const m = res.metadata || {};
       const txt = res.ok
-        ? `✅ ${res.filename} → ${res.chunks} chunks · tipo: ${(res.metadata||{}).tipo||'otro'} · radicado: ${(res.metadata||{}).radicado||'—'}`
+        ? (res.enriched
+           ? `✅ ${res.filename} → ${res.chunks} chunks · ${m.tipo||'otro'} · ${m.radicado||'sin radicado'}`
+           : `⚡ ${res.filename} → ${res.chunks} chunks · pendiente IA (usa "Enriquecer N con IA")`)
         : `❌ ${res.filename} → ${res.error}`;
       return `<div class="upload-row ${cls}">${txt}</div>`;
     }).join('');
@@ -2967,6 +2981,26 @@ async function adminUploadFiles(filelist){
     cont.innerHTML = `<div class="upload-row err">❌ ${e.message}</div>`;
   }
   document.getElementById('file-input-admin').value = '';
+  if(document.getElementById('file-input-admin-ai')) document.getElementById('file-input-admin-ai').value = '';
+}
+
+async function enriquecerLote(limit){
+  if(!confirm(`¿Enriquecer hasta ${limit} documentos pendientes con IA? Esto consume cuota de Gemini.`)) return;
+  const cont = document.getElementById('upload-progress-admin');
+  cont.innerHTML = `<div class="upload-row">🤖 Enriqueciendo lote de ${limit}… (puede tardar 30-60s)</div>`;
+  try{
+    const r = await api('/api/admin/rag/enrich-batch',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({limit})});
+    cont.innerHTML = `<div class="upload-row ok">✅ Procesados: ${r.processed} documentos</div>` +
+      (r.results||[]).map(res=>{
+        const cls = res.ok ? 'ok' : 'err';
+        const txt = res.ok
+          ? `  ✓ ${res.filename} → ${res.tipo||'otro'} · ${res.radicado||'sin radicado'}`
+          : `  ✗ ${res.filename} → ${res.error}`;
+        return `<div class="upload-row ${cls}">${txt}</div>`;
+      }).join('');
+    loadRagDocs();
+  }catch(e){ cont.innerHTML = `<div class="upload-row err">❌ ${e.message}</div>`; }
 }
 
 async function verRagDoc(id){

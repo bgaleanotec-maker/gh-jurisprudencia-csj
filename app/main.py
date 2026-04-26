@@ -1148,12 +1148,16 @@ MAX_PDF_SIZE = 25 * 1024 * 1024  # 25 MB
 
 
 async def _process_uploaded_pdfs(files: list[UploadFile], lawyer_id: Optional[int],
-                                  by_admin: bool, doc_type: str = "otro") -> list[dict]:
-    """Procesa una lista de PDFs: extrae texto, fichas con IA, guarda en DB."""
+                                  by_admin: bool, doc_type: str = "otro",
+                                  enriquecer: bool = False) -> list[dict]:
+    """Procesa PDFs: extrae texto, chunkifica, opcionalmente ficha con IA.
+    Por default modo RÁPIDO (sin IA) — para miles de PDFs sin gastar cuota.
+    Usa enrich-batch o enrich/{id} después para enriquecer."""
     out = []
     motor = None
-    try: motor = get_motor()
-    except HTTPException: motor = None
+    if enriquecer:
+        try: motor = get_motor()
+        except HTTPException: motor = None
 
     for upload in files:
         if not upload.filename.lower().endswith(".pdf"):
@@ -1163,7 +1167,6 @@ async def _process_uploaded_pdfs(files: list[UploadFile], lawyer_id: Optional[in
             out.append({"filename": upload.filename, "ok": False,
                         "error": f"Archivo demasiado grande (>25 MB)."}); continue
 
-        # Crear documento en estado uploaded
         doc_id = db_mod.create_rag_document(
             filename=upload.filename, file_size=len(data),
             uploaded_by_lawyer_id=lawyer_id, uploaded_by_admin=by_admin, doc_type=doc_type,
@@ -1171,7 +1174,7 @@ async def _process_uploaded_pdfs(files: list[UploadFile], lawyer_id: Optional[in
         db_mod.update_rag_document(doc_id, status="processing")
 
         try:
-            res = rag_in.procesar_pdf(data, upload.filename, motor=motor)
+            res = rag_in.procesar_pdf(data, upload.filename, motor=motor, enriquecer=enriquecer)
             chunks_count = db_mod.add_rag_chunks(doc_id, res["chunks"])
             db_mod.update_rag_document(doc_id,
                 status="processed",
@@ -1182,21 +1185,84 @@ async def _process_uploaded_pdfs(files: list[UploadFile], lawyer_id: Optional[in
                 doc_type=res["metadata"].get("tipo") or doc_type,
             )
             out.append({"filename": upload.filename, "ok": True, "doc_id": doc_id,
-                        "chunks": chunks_count, "metadata": res["metadata"]})
+                        "chunks": chunks_count, "metadata": res["metadata"],
+                        "enriched": res.get("enriched", False)})
         except Exception as e:
             db_mod.update_rag_document(doc_id, status="error", error=str(e))
             out.append({"filename": upload.filename, "ok": False, "error": str(e)})
     return out
 
 
+def _enriquecer_un_doc(doc_id: int, motor) -> dict:
+    """Toma un doc existente, carga sus primeros chunks de DB y le pide a IA la metadata."""
+    with db_mod.db() as c:
+        rows = c.execute(
+            "SELECT chunk_index, page, texto FROM rag_chunks WHERE doc_id=? ORDER BY chunk_index LIMIT 6",
+            (doc_id,)
+        ).fetchall()
+    if not rows:
+        raise ValueError("doc sin chunks")
+    primeros = [{"texto": r["texto"], "page": r["page"]} for r in rows]
+    meta = rag_in.enriquecer_documento_existente(motor, primeros)
+    db_mod.update_rag_document(doc_id, metadata=meta,
+        doc_type=meta.get("tipo") or "otro")
+    return meta
+
+
 # Endpoints ADMIN
 
 @app.post("/api/admin/rag/upload", dependencies=[Depends(admin_auth)])
-async def admin_rag_upload(files: list[UploadFile] = File(...)):
+async def admin_rag_upload(files: list[UploadFile] = File(...), enriquecer: bool = False):
+    """Por default modo RÁPIDO (sin IA). Pasa ?enriquecer=true para fichar con IA al subir."""
     if not files:
         raise HTTPException(400, "Sin archivos")
-    res = await _process_uploaded_pdfs(files, lawyer_id=None, by_admin=True)
-    return {"ok": True, "results": res}
+    res = await _process_uploaded_pdfs(files, lawyer_id=None, by_admin=True,
+                                        enriquecer=enriquecer)
+    return {"ok": True, "results": res, "enriched": enriquecer}
+
+
+@app.post("/api/admin/rag/documents/{doc_id}/enrich", dependencies=[Depends(admin_auth)])
+async def admin_rag_enrich_one(doc_id: int):
+    d = db_mod.get_rag_document(doc_id)
+    if not d: raise HTTPException(404, "doc no encontrado")
+    motor = get_motor()
+    try:
+        meta = _enriquecer_un_doc(doc_id, motor)
+        return {"ok": True, "metadata": meta}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+class EnrichBatchBody(BaseModel):
+    limit: int = Field(10, ge=1, le=50)
+
+
+@app.post("/api/admin/rag/enrich-batch", dependencies=[Depends(admin_auth)])
+async def admin_rag_enrich_batch(body: EnrichBatchBody):
+    """Toma N documentos en estado 'processed' que NO han sido enriquecidos y les
+    aplica IA. Para procesar miles sin saturar la cuota: corre por lotes pequeños."""
+    motor = get_motor()
+    # buscar pendientes (no _enriched o sin radicado real)
+    docs = db_mod.list_rag_documents(status="processed", limit=200)
+    pendientes = []
+    for d in docs:
+        m = d.get("metadata") or {}
+        if not m.get("_enriched"):
+            pendientes.append(d)
+    pendientes = pendientes[:body.limit]
+
+    enriquecidos = []
+    for d in pendientes:
+        try:
+            meta = _enriquecer_un_doc(d["id"], motor)
+            enriquecidos.append({"doc_id": d["id"], "filename": d["filename"],
+                                  "ok": True, "tipo": meta.get("tipo"),
+                                  "radicado": meta.get("radicado")})
+        except Exception as e:
+            enriquecidos.append({"doc_id": d["id"], "filename": d["filename"],
+                                  "ok": False, "error": str(e)})
+    return {"ok": True, "processed": len(enriquecidos), "results": enriquecidos,
+            "remaining_pending": max(0, len(pendientes) - body.limit + (len(docs) - len(pendientes)))}
 
 
 @app.get("/api/admin/rag/documents", dependencies=[Depends(admin_auth)])
@@ -1286,9 +1352,12 @@ async def admin_rag_reindex():
 @app.post("/api/pro/rag/upload")
 async def pro_rag_upload(files: list[UploadFile] = File(...),
                           lawyer: dict = Depends(auth_mod.require_lawyer)):
+    """Modo RÁPIDO siempre (los abogados nunca disparan IA al subir, para preservar
+    cuota global). El admin puede después enriquecer en lote."""
     if not files:
         raise HTTPException(400, "Sin archivos")
-    res = await _process_uploaded_pdfs(files, lawyer_id=lawyer["id"], by_admin=False)
+    res = await _process_uploaded_pdfs(files, lawyer_id=lawyer["id"], by_admin=False,
+                                        enriquecer=False)
     return {"ok": True, "results": res}
 
 

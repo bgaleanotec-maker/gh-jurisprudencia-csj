@@ -192,26 +192,64 @@ def fichar_documento_con_ia(motor, texto_inicio: str) -> dict:
         return {**fallback, "_error_ai": str(e)}
 
 
-def procesar_pdf(file_bytes: bytes, filename: str, motor=None) -> dict:
+def _meta_basica_sin_ia(filename: str, paginas: int) -> dict:
+    """Metadata mínima inferida del nombre de archivo, sin gastar IA.
+    Detecta radicado tipo STC/STL/STP-XXX-AAAA en el filename si existe."""
+    rad_match = re.search(r"(STC|STL|STP|STI|STQ|T|C|SU)\s*[-_ ]?(\d{1,5})\s*[-_/]?\s*(\d{2,4})",
+                          filename, flags=re.IGNORECASE)
+    radicado = None
+    anio = None
+    if rad_match:
+        prefix = rad_match.group(1).upper()
+        num = rad_match.group(2)
+        yr = rad_match.group(3)
+        if len(yr) == 2: yr = "20" + yr
+        radicado = f"{prefix}{num}-{yr}"
+        try: anio = int(yr)
+        except: pass
+    return {
+        "tipo": "otro", "sala": "—", "radicado": radicado, "anio": anio,
+        "areas": [], "temas": [], "tesis": None, "descriptores": [],
+        "resumen_corto": "Documento cargado en modo rápido. Pendiente de enriquecer con IA.",
+        "paginas_total": paginas, "filename": filename,
+        "_enriched": False,
+    }
+
+
+def procesar_pdf(file_bytes: bytes, filename: str, motor=None,
+                 enriquecer: bool = False) -> dict:
     """
-    Pipeline completo: extraer texto → chunks → metadata IA.
-    Devuelve {'paginas','chunks','metadata','tokens_est','full_text_len'}.
-    NO persiste; eso lo hace el endpoint con db.create_rag_document + add_rag_chunks.
+    Pipeline configurable:
+      - enriquecer=False (DEFAULT, RÁPIDO): solo extrae texto + chunks. Sin IA, sin costo.
+        Metadata mínima (radicado del filename si está). Status final: processed.
+      - enriquecer=True: además llama a Gemini para fichar (sala/temas/tesis).
+
+    Para miles de PDFs: subir todos en modo rápido y enriquecer por lotes después.
     """
     paginas, full = extraer_texto_pdf(file_bytes)
     chunks = chunkificar(paginas)
-    # primeras N páginas para fichar
-    inicio = "\n\n".join(p["text"] for p in paginas[:MAX_PAGES_FOR_AI_METADATA])
-    metadata = fichar_documento_con_ia(motor, inicio) if motor else {
-        "tipo":"otro","sala":"—","radicado":None,"anio":None,"areas":[],"temas":[],
-        "tesis":None,"descriptores":[],"resumen_corto":"Cargado sin IA."
-    }
-    metadata["paginas_total"] = len(paginas)
-    metadata["filename"] = filename
+    if enriquecer and motor:
+        inicio = "\n\n".join(p["text"] for p in paginas[:MAX_PAGES_FOR_AI_METADATA])
+        metadata = fichar_documento_con_ia(motor, inicio)
+        metadata["paginas_total"] = len(paginas)
+        metadata["filename"] = filename
+        metadata["_enriched"] = True
+    else:
+        metadata = _meta_basica_sin_ia(filename, len(paginas))
     return {
         "paginas": len(paginas),
         "chunks": chunks,
         "metadata": metadata,
         "tokens_est": sum(c["tokens_est"] for c in chunks),
         "full_text_len": len(full),
+        "enriched": metadata.get("_enriched", False),
     }
+
+
+def enriquecer_documento_existente(motor, primeros_chunks: list[dict]) -> dict:
+    """Toma los primeros chunks de un doc ya almacenado y le aplica IA para extraer
+    metadata estructurada. Usado por el endpoint enrich/{doc_id} y enrich-batch."""
+    inicio = "\n\n".join(c.get("texto","") for c in primeros_chunks[:MAX_PAGES_FOR_AI_METADATA])
+    metadata = fichar_documento_con_ia(motor, inicio)
+    metadata["_enriched"] = True
+    return metadata
