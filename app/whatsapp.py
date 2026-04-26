@@ -48,24 +48,10 @@ def es_celular_colombia(phone_norm: str) -> bool:
 # ── Envío bruto ───────────────────────────────────────────────────────────────
 
 def send_text(to_phone_norm: str, body: str) -> dict:
-    """Envía mensaje vía UltraMsg. to_phone_norm sin '+' (formato 573...)."""
-    if not (ULTRAMSG_INSTANCE and ULTRAMSG_TOKEN):
-        return {"sent": False, "error": "UltraMsg sin configurar"}
-    url = f"{API_BASE}/{ULTRAMSG_INSTANCE}/messages/chat"
-    data = {
-        "token": ULTRAMSG_TOKEN,
-        "to":    to_phone_norm,
-        "body":  body,
-        "priority": "10",
-    }
-    try:
-        r = httpx.post(url, data=data, timeout=15)
-        r.raise_for_status()
-        out = r.json() if r.headers.get("content-type","").startswith("application/json") else {"raw": r.text}
-        out["sent"] = True
-        return out
-    except httpx.HTTPError as e:
-        return {"sent": False, "error": str(e)}
+    """Envía mensaje. Usa el provider configurado en WA_PROVIDER
+    (ultramsg | evolution | hybrid). Mantiene compatibilidad con código existente."""
+    from app import wa_provider
+    return wa_provider.get_provider().send_text(to_phone_norm, body)
 
 
 # ── OTP ───────────────────────────────────────────────────────────────────────

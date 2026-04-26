@@ -638,6 +638,37 @@ async def admin_delete_lawyer(lid: int):
 async def admin_list_appts(status: Optional[str] = None, upcoming: bool = False):
     return db_mod.list_appointments(status=status, upcoming_only=upcoming, limit=500)
 
+class WaTestBody(BaseModel):
+    phone: str
+    body: str = "Mensaje de prueba — Galeano Herrera | Abogados"
+    provider: Optional[str] = None  # ultramsg | evolution | hybrid (override del default)
+
+
+@app.get("/api/admin/wa/status", dependencies=[Depends(admin_auth)])
+async def admin_wa_status():
+    from app import wa_provider
+    return wa_provider.status()
+
+
+@app.post("/api/admin/wa/test", dependencies=[Depends(admin_auth)])
+async def admin_wa_test(body: WaTestBody):
+    """Envía un mensaje de prueba para verificar que un provider funciona."""
+    from app import wa_provider
+    phone = wa.normalizar_telefono(body.phone)
+    if not wa.es_celular_colombia(phone):
+        raise HTTPException(400, "Celular inválido (formato 3XXXXXXXXX).")
+    if body.provider:
+        # forzar uno específico para esta prueba
+        if body.provider == "evolution": p = wa_provider.EvolutionAPIProvider()
+        elif body.provider == "hybrid":  p = wa_provider.HybridProvider()
+        elif body.provider == "ultramsg": p = wa_provider.UltraMsgProvider()
+        else: raise HTTPException(400, "Provider inválido.")
+        res = p.send_text(phone, body.body)
+    else:
+        res = wa_provider.get_provider().send_text(phone, body.body)
+    return res
+
+
 @app.get("/api/admin/config", dependencies=[Depends(admin_auth)])
 async def admin_config():
     motor = get_motor_lite()
