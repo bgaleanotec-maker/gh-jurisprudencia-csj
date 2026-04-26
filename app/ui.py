@@ -2165,6 +2165,155 @@ setInterval(loadStats, 60000);
 
 
 # =============================================================================
+# EXPEDIENTE — Página pública de aceptación con OTP (firma electrónica)
+# =============================================================================
+
+def expediente_aceptar_html(token: str = "") -> str:
+    safe = (token or "").replace("'", "")
+    return ("""<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aceptar expediente · Galeano Herrera</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',sans-serif;}
+  body{background:#f4f6f9;color:#1a2332;padding:20px 12px;}
+  .wrap{max-width:580px;margin:30px auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(0,35,71,.08);}
+  .head{background:linear-gradient(135deg,#002347,#003f7a);color:#fff;padding:28px;text-align:center;border-bottom:3px solid #C5A059;}
+  .head .logo{font-size:22px;font-weight:800;margin-bottom:8px;}
+  .head .logo span{color:#C5A059;}
+  .head h1{font-size:20px;font-weight:700;margin-bottom:4px;}
+  .head p{font-size:13px;opacity:.9;}
+  .body{padding:24px 28px;}
+  .meta{background:#f6f8fb;padding:16px;border-radius:8px;margin-bottom:18px;font-size:14px;line-height:1.7;}
+  .meta b{color:#002347;}
+  .alert{background:#fef9e7;border:1px solid #C5A059;color:#7a5500;padding:12px;border-radius:6px;font-size:12px;margin-bottom:18px;line-height:1.5;}
+  label{display:block;font-size:11px;font-weight:700;color:#002347;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+  .otp-input{width:100%;font-size:30px;letter-spacing:14px;text-align:center;padding:14px;font-family:monospace;border:2px solid #dce3ef;border-radius:8px;background:#fafbfc;}
+  .otp-input:focus{outline:none;border-color:#002347;background:#fff;}
+  .btn{background:#16a34a;color:#fff;border:none;padding:14px;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;width:100%;margin-top:14px;transition:background .15s;}
+  .btn:hover{background:#15803d;}
+  .btn:disabled{background:#9ca3af;}
+  .err{background:#ffebee;color:#b71c1c;padding:10px;border-radius:6px;font-size:13px;margin-top:12px;}
+  .ok{background:#dcfce7;color:#166534;padding:14px;border-radius:6px;font-size:14px;text-align:center;font-weight:700;}
+  .info-line{margin-bottom:6px;}
+  .info-line .l{color:#6b7280;font-size:12px;}
+  .info-line .v{font-weight:600;color:#1a2332;}
+  .terms{font-size:11px;color:#6b7280;line-height:1.5;margin-top:14px;border-top:1px solid #e5e7eb;padding-top:12px;}
+  .estado-badge{display:inline-block;padding:4px 12px;border-radius:14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+  .estado-pendiente_aceptacion{background:#fef3c7;color:#92400e;}
+  .estado-aceptado{background:#dcfce7;color:#166534;}
+  .estado-borrador{background:#f3f4f6;color:#666;}
+</style></head><body>
+
+<div class="wrap">
+  <div class="head">
+    <div class="logo">Galeano <span>Herrera</span></div>
+    <h1>Apertura formal de expediente</h1>
+    <p>Lee y firma con tu código WhatsApp</p>
+  </div>
+  <div class="body" id="body">
+    <div style="text-align:center;padding:40px 0;color:#6b7280">Cargando…</div>
+  </div>
+</div>
+
+<script>
+const TOKEN = '""" + safe + """';
+
+async function cargar(){
+  if(!TOKEN){
+    document.getElementById('body').innerHTML = '<div class="err">❌ Enlace inválido. Pídele a tu abogado uno nuevo.</div>';
+    return;
+  }
+  try{
+    const r = await fetch('/api/expediente/'+TOKEN+'/info');
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Error');
+    render(d);
+  }catch(e){
+    document.getElementById('body').innerHTML = `<div class="err">❌ ${e.message}</div>`;
+  }
+}
+
+function fmtCOP(n){ if(!n) return '—'; return '$' + Number(n).toLocaleString('es-CO') + ' COP'; }
+function fmtModalidad(m){
+  return ({fijo:'Honorario fijo', porcentaje:'Porcentaje sobre lo recuperado',
+    mixto:'Mixto', contingente:'Contingente (paga si gana)', pro_bono:'Pro bono'}[m] || m || '—');
+}
+
+function render(d){
+  if(d.estado === 'aceptado'){
+    document.getElementById('body').innerHTML = `
+      <div class="ok">✅ Este expediente ya fue aceptado.</div>
+      <div style="text-align:center;margin-top:14px;color:#6b7280;font-size:13px">
+        Expediente: <b>${d.numero}</b><br>Tu abogado se pondrá en contacto contigo.
+      </div>`;
+    return;
+  }
+  if(d.estado === 'borrador'){
+    document.getElementById('body').innerHTML = `
+      <div class="alert">⏳ Tu abogado aún no ha enviado este expediente para aceptación.<br>Espera el código por WhatsApp.</div>`;
+    return;
+  }
+  const honMonto = d.honorarios_modalidad === 'porcentaje'
+    ? `${d.honorarios_cop || 0}% sobre lo recuperado`
+    : fmtCOP(d.honorarios_cop);
+  document.getElementById('body').innerHTML = `
+    <div class="meta">
+      <div class="info-line"><div class="l">Expediente</div><div class="v">${d.numero}</div></div>
+      <div class="info-line"><div class="l">Estado</div><div class="v"><span class="estado-badge estado-${d.estado}">${d.estado.replace('_',' ')}</span></div></div>
+      <div class="info-line" style="margin-top:10px"><div class="l">Alcance del servicio</div><div class="v">${d.alcance || '—'}</div></div>
+      <div class="info-line" style="margin-top:10px"><div class="l">Modalidad de honorarios</div><div class="v">${fmtModalidad(d.honorarios_modalidad)}</div></div>
+      <div class="info-line"><div class="l">Honorarios</div><div class="v">${honMonto}</div></div>
+      ${d.honorarios_descripcion ? `<div class="info-line" style="margin-top:6px"><div class="l">Detalle</div><div class="v">${d.honorarios_descripcion}</div></div>` : ''}
+      ${d.obligaciones_cliente ? `<div class="info-line" style="margin-top:10px"><div class="l">Tus obligaciones</div><div class="v">${d.obligaciones_cliente}</div></div>` : ''}
+    </div>
+
+    <div class="alert">
+      <b>Importante:</b> al ingresar el código que recibiste por WhatsApp, aceptas el alcance y los honorarios anteriores como mandato profesional. Esta firma electrónica tiene plena validez legal según <b>Ley 527 de 1999</b>. El abogado no garantiza un resultado específico (Art. 38 Ley 1123/2007).
+    </div>
+
+    <label>Ingresa el código de 6 dígitos que recibiste por WhatsApp</label>
+    <input type="text" id="otp" class="otp-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="······" autofocus>
+    <button class="btn" id="btn-accept" onclick="aceptar()">✍️ Aceptar y abrir expediente</button>
+    <div id="err"></div>
+
+    <div class="terms">
+      Al aceptar, queda constancia de tu identidad mediante el código enviado a tu WhatsApp registrado. Esta interacción se registra (timestamp + IP) en una bitácora auditable conforme al Estatuto del Abogado y la Ley 1581/2012 de Habeas Data.
+    </div>`;
+}
+
+async function aceptar(){
+  const otp = document.getElementById('otp').value.trim();
+  if(otp.length !== 6){
+    document.getElementById('err').innerHTML = '<div class="err">Ingresa los 6 dígitos.</div>';
+    return;
+  }
+  document.getElementById('btn-accept').disabled = true;
+  document.getElementById('btn-accept').textContent = 'Verificando…';
+  try{
+    const r = await fetch('/api/expediente/accept',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token:TOKEN, otp:otp})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Error');
+    document.getElementById('body').innerHTML = `
+      <div class="ok">✅ ¡Expediente ${d.numero} firmado!</div>
+      <div style="text-align:center;margin-top:14px;font-size:13px;color:#6b7280;line-height:1.6">
+        Tu abogado ya puede iniciar la gestión.<br>Te enviará novedades por WhatsApp.
+      </div>`;
+  }catch(e){
+    document.getElementById('err').innerHTML = '<div class="err">❌ '+e.message+'</div>';
+    document.getElementById('btn-accept').disabled = false;
+    document.getElementById('btn-accept').textContent = '✍️ Aceptar y abrir expediente';
+  }
+}
+
+cargar();
+</script>
+</body></html>""")
+
+
+# =============================================================================
 # LAWYER WORKSPACE (por-lead)
 # =============================================================================
 
@@ -2271,8 +2420,58 @@ def lawyer_workspace_html(lawyer: dict, lead: dict) -> str:
     <div class="quick-actions" style="margin-top:12px">
       <a class="btn green" href="https://wa.me/""" + esc(phone) + """" target="_blank" id="qa-wa">💬 WhatsApp</a>
       <button class="btn gold" onclick="setStatus('contacted')">Marcar contactado</button>
+      <button class="btn outline" onclick="abrirExpediente()">📋 Abrir expediente</button>
       <button class="btn" onclick="setStatus('closed')">Cerrar caso</button>
       <a class="btn outline" href="/api/lead/download/""" + esc(lead.get("token","")) + """.docx" target="_blank">📥 Descargar borrador actual</a>
+    </div>
+    <div id="exp-banner" style="margin-top:10px"></div>
+  </div>
+
+  <!-- Modal: Abrir expediente -->
+  <div class="modal-bg" id="m-exp">
+    <div class="modal" style="max-width:680px">
+      <span class="modal-close" onclick="cerrarModalesWS()">×</span>
+      <h3 style="color:#002347;margin-bottom:6px">📋 Abrir expediente formal</h3>
+      <div style="font-size:13px;color:#6b7280;margin-bottom:18px">El cliente firmará electrónicamente con OTP por WhatsApp. La aceptación queda registrada con timestamp + IP en bitácora auditable. Protege al despacho ante cualquier reclamo posterior.</div>
+
+      <div class="form-group">
+        <label style="font-size:11px;font-weight:700;color:#002347;text-transform:uppercase;display:block;margin-bottom:6px">Alcance del servicio</label>
+        <textarea id="exp-alcance" rows="3" style="width:100%;padding:10px;border:1px solid #dce3ef;border-radius:6px" placeholder="Presentar acción de tutela contra X por Y, hacer seguimiento del fallo y eventual impugnación.">Presentar acción de tutela y hacer seguimiento del proceso hasta el fallo en firme.</textarea>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <div>
+          <label style="font-size:11px;font-weight:700;color:#002347;text-transform:uppercase;display:block;margin-bottom:6px">Modalidad</label>
+          <select id="exp-modalidad" style="width:100%;padding:10px;border:1px solid #dce3ef;border-radius:6px">
+            <option value="fijo">Honorario fijo</option>
+            <option value="porcentaje">Porcentaje sobre lo recuperado</option>
+            <option value="mixto">Mixto (fijo + éxito)</option>
+            <option value="contingente">Contingente (paga si gana)</option>
+            <option value="pro_bono">Pro bono</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:700;color:#002347;text-transform:uppercase;display:block;margin-bottom:6px">Monto / %</label>
+          <input id="exp-monto" type="number" min="0" placeholder="200000" style="width:100%;padding:10px;border:1px solid #dce3ef;border-radius:6px">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label style="font-size:11px;font-weight:700;color:#002347;text-transform:uppercase;display:block;margin-bottom:6px">Detalle de honorarios (opcional)</label>
+        <input id="exp-detalle" placeholder="Pago al firmar; gastos administrativos por separado" style="width:100%;padding:10px;border:1px solid #dce3ef;border-radius:6px">
+      </div>
+
+      <div class="form-group">
+        <label style="font-size:11px;font-weight:700;color:#002347;text-transform:uppercase;display:block;margin-bottom:6px">Obligaciones del cliente</label>
+        <textarea id="exp-obligaciones" rows="2" style="width:100%;padding:10px;border:1px solid #dce3ef;border-radius:6px" placeholder="Aportar documentación oportuna, asistir a diligencias, notificar cambios.">Aportar la documentación solicitada en el plazo indicado, asistir a las diligencias necesarias y notificar cambios de domicilio o teléfono.</textarea>
+      </div>
+
+      <div id="exp-err" style="margin-top:10px;font-size:13px;color:#c8102e"></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+        <button class="btn outline" onclick="cerrarModalesWS()">Cancelar</button>
+        <button class="btn" id="btn-exp-save" onclick="guardarExpediente()">💾 Crear expediente</button>
+        <button class="btn green" id="btn-exp-send" onclick="guardarYEnviar()">📲 Crear + enviar OTP al cliente</button>
+      </div>
     </div>
   </div>
 
@@ -2568,6 +2767,100 @@ async function guardarBorrador(){
     toast('✓ Borrador guardado. El cliente verá esta versión al descargar.');
   }catch(e){alert(e.message);}
 }
+
+// ─── Expediente formal ──────────────────────────────────────────────────
+function cerrarModalesWS(){ document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('on')); }
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape') cerrarModalesWS(); });
+
+function abrirExpediente(){
+  document.getElementById('exp-err').textContent = '';
+  document.getElementById('m-exp').classList.add('on');
+}
+
+function _expBody(){
+  return {
+    alcance:                document.getElementById('exp-alcance').value.trim(),
+    honorarios_modalidad:   document.getElementById('exp-modalidad').value,
+    honorarios_cop:         parseInt(document.getElementById('exp-monto').value) || null,
+    honorarios_descripcion: document.getElementById('exp-detalle').value.trim(),
+    obligaciones_cliente:   document.getElementById('exp-obligaciones').value.trim(),
+  };
+}
+
+async function guardarExpediente(){
+  try{
+    const r = await fetch('/api/pro/leads/'+LEAD.id+'/expediente',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(_expBody())});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Error');
+    cerrarModalesWS();
+    toast('✓ Expediente '+d.numero+' creado en borrador');
+    cargarExpediente();
+  }catch(e){ document.getElementById('exp-err').textContent = e.message; }
+}
+
+async function guardarYEnviar(){
+  try{
+    const r = await fetch('/api/pro/leads/'+LEAD.id+'/expediente',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(_expBody())});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'Error');
+    // Enviar OTP al cliente
+    const r2 = await fetch('/api/pro/expedientes/'+d.id+'/send-otp',{method:'POST'});
+    const d2 = await r2.json();
+    if(!r2.ok) throw new Error(d2.detail || 'Error');
+    cerrarModalesWS();
+    let msg = '✓ Expediente '+d.numero+' enviado al cliente';
+    if(d2.otp_debug) msg += ' (DEV OTP: '+d2.otp_debug+')';
+    toast(msg);
+    cargarExpediente();
+  }catch(e){ document.getElementById('exp-err').textContent = e.message; }
+}
+
+async function cargarExpediente(){
+  try{
+    const r = await fetch('/api/pro/leads/'+LEAD.id+'/expediente');
+    if(r.status === 404){ document.getElementById('exp-banner').innerHTML = ''; return; }
+    if(!r.ok) return;
+    const e = await r.json();
+    const cls = {borrador:'#f3f4f6;color:#666',
+                 pendiente_aceptacion:'#fef3c7;color:#92400e',
+                 aceptado:'#dcfce7;color:#166534',
+                 en_curso:'#dbeafe;color:#1e40af',
+                 cerrado:'#e5e7eb;color:#374151'}[e.estado] || '#eee;color:#666';
+    let extras = '';
+    if(e.estado === 'borrador'){
+      extras = `<button class="btn btn-sm green" onclick="enviarOtpExpediente(${e.id})">📲 Enviar al cliente</button>`;
+    } else if(e.estado === 'pendiente_aceptacion'){
+      extras = `<a class="btn btn-sm outline" href="/expediente/aceptar?t=${e.token}" target="_blank">Ver enlace cliente</a>
+                <button class="btn btn-sm outline" onclick="enviarOtpExpediente(${e.id})">↻ Reenviar OTP</button>`;
+    }
+    document.getElementById('exp-banner').innerHTML = `
+      <div style="background:#f6f8fb;border-left:3px solid #C5A059;padding:10px 14px;border-radius:0 6px 6px 0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:13px">
+        <div>
+          📋 <b>Expediente ${e.numero}</b> ·
+          <span style="background:${cls};padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;text-transform:uppercase">${e.estado.replace('_',' ')}</span>
+          ${e.accepted_at ? ' · ✅ aceptado '+(e.accepted_at||'').slice(0,16) : ''}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${extras}</div>
+      </div>`;
+  }catch(e){}
+}
+
+async function enviarOtpExpediente(eid){
+  try{
+    const r = await fetch('/api/pro/expedientes/'+eid+'/send-otp',{method:'POST'});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail||'Error');
+    let msg = '✓ OTP enviado al cliente';
+    if(d.otp_debug) msg += ' (DEV: '+d.otp_debug+')';
+    toast(msg);
+    cargarExpediente();
+  }catch(e){ alert(e.message); }
+}
+
+// Cargar al abrir
+cargarExpediente();
 </script>
 </body></html>"""
 

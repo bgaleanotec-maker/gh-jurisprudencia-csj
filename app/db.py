@@ -170,6 +170,35 @@ def init_db() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc ON rag_chunks(doc_id);
         CREATE INDEX IF NOT EXISTS idx_rag_chunks_active ON rag_chunks(active);
+
+        -- Expedientes formales (con OTP de aceptación del cliente)
+        CREATE TABLE IF NOT EXISTS expedientes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_id INTEGER NOT NULL REFERENCES leads(id),
+            lawyer_id INTEGER REFERENCES lawyers(id),
+            numero TEXT UNIQUE,                          -- ej: GH-2026-001
+            token TEXT NOT NULL UNIQUE,                  -- para acceso público
+            estado TEXT NOT NULL DEFAULT 'borrador',
+                -- borrador | pendiente_aceptacion | aceptado | en_curso | cerrado | desistido
+            area TEXT,
+            honorarios_cop INTEGER,
+            honorarios_modalidad TEXT,                   -- fijo | porcentaje | mixto | contingente | pro_bono
+            honorarios_descripcion TEXT,
+            alcance TEXT,
+            obligaciones_cliente TEXT,
+            otp TEXT,
+            otp_expires TEXT,
+            otp_attempts INTEGER NOT NULL DEFAULT 0,
+            accepted_at TEXT,
+            accepted_ip TEXT,
+            closed_at TEXT,
+            closed_reason TEXT,
+            audit_log TEXT NOT NULL DEFAULT '[]',        -- JSON array append-only
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_exp_lead ON expedientes(lead_id);
+        CREATE INDEX IF NOT EXISTS idx_exp_lawyer ON expedientes(lawyer_id);
+        CREATE INDEX IF NOT EXISTS idx_exp_estado ON expedientes(estado);
         """)
 
 
@@ -790,6 +819,194 @@ def rag_stats() -> dict:
         "total_chunks": chunks,
         "chunks_in_rag": chunks_appr,
     }
+
+
+# ── Expedientes (con OTP de aceptación del cliente y bitácora silenciosa) ────
+
+import secrets as _ssec_exp
+import time as _t_exp
+
+
+def _next_expediente_numero() -> str:
+    """Numerador correlativo GH-YYYY-NNN."""
+    yr = datetime.now().strftime("%Y")
+    with db() as c:
+        r = c.execute("SELECT numero FROM expedientes WHERE numero LIKE ? ORDER BY id DESC LIMIT 1",
+                      (f"GH-{yr}-%",)).fetchone()
+    if not r or not r["numero"]:
+        return f"GH-{yr}-001"
+    try:
+        n = int(r["numero"].split("-")[-1]) + 1
+        return f"GH-{yr}-{n:03d}"
+    except Exception:
+        return f"GH-{yr}-001"
+
+
+def _audit_append(audit_log_json: Optional[str], evento: str, **data) -> str:
+    try: arr = json.loads(audit_log_json or "[]")
+    except Exception: arr = []
+    entry = {"evento": evento, "ts": datetime.now().isoformat(), **data}
+    arr.append(entry)
+    return json.dumps(arr, ensure_ascii=False)
+
+
+def _audit_log_to_dict(json_str: Optional[str]) -> list:
+    try: return json.loads(json_str or "[]")
+    except Exception: return []
+
+
+def crear_expediente(lead_id: int, lawyer_id: Optional[int],
+                     by_lawyer_id: Optional[int],
+                     alcance: str = "", area: str = "",
+                     honorarios_cop: Optional[int] = None,
+                     honorarios_modalidad: str = "fijo",
+                     honorarios_descripcion: str = "",
+                     obligaciones_cliente: str = "") -> dict:
+    """Crea un expediente en estado 'borrador'. Genera token público y número correlativo."""
+    numero = _next_expediente_numero()
+    token = _ssec_exp.token_hex(16)
+    audit = _audit_append(None, "expediente.creado",
+                          by_lawyer_id=by_lawyer_id, lead_id=lead_id, numero=numero)
+    with db() as c:
+        cur = c.execute(
+            """INSERT INTO expedientes(lead_id, lawyer_id, numero, token, estado, area,
+                  honorarios_cop, honorarios_modalidad, honorarios_descripcion,
+                  alcance, obligaciones_cliente, audit_log)
+               VALUES(?,?,?,?, 'borrador', ?,?,?,?,?,?, ?)""",
+            (lead_id, lawyer_id, numero, token, area, honorarios_cop,
+             honorarios_modalidad, honorarios_descripcion, alcance, obligaciones_cliente, audit),
+        )
+        eid = cur.lastrowid
+    return get_expediente(eid)
+
+
+def get_expediente(eid: int) -> Optional[dict]:
+    with db() as c:
+        r = c.execute("""SELECT e.*, l.name as lead_name, l.cedula as lead_cedula,
+                                l.phone as lead_phone, l.email as lead_email,
+                                l.descripcion as lead_descripcion,
+                                w.name as lawyer_name, w.email as lawyer_email
+                         FROM expedientes e
+                         LEFT JOIN leads l ON l.id = e.lead_id
+                         LEFT JOIN lawyers w ON w.id = e.lawyer_id
+                         WHERE e.id=?""", (eid,)).fetchone()
+        if not r: return None
+        d = dict(r)
+        d["audit_log"] = _audit_log_to_dict(d.get("audit_log"))
+        return d
+
+
+def get_expediente_by_token(token: str) -> Optional[dict]:
+    with db() as c:
+        r = c.execute("SELECT * FROM expedientes WHERE token=?", (token,)).fetchone()
+        if not r: return None
+        d = dict(r); d["audit_log"] = _audit_log_to_dict(d.get("audit_log")); return d
+
+
+def list_expedientes(lawyer_id: Optional[int] = None,
+                     estado: Optional[str] = None, limit: int = 200) -> list[dict]:
+    sql = """SELECT e.*, l.name as lead_name, l.phone as lead_phone, l.email as lead_email
+             FROM expedientes e LEFT JOIN leads l ON l.id = e.lead_id
+             WHERE 1=1"""
+    params: list = []
+    if lawyer_id: sql += " AND e.lawyer_id=?"; params.append(lawyer_id)
+    if estado:    sql += " AND e.estado=?";    params.append(estado)
+    sql += " ORDER BY e.created_at DESC LIMIT ?"; params.append(limit)
+    out = []
+    with db() as c:
+        for r in c.execute(sql, params):
+            d = dict(r); d["audit_log"] = _audit_log_to_dict(d.get("audit_log")); out.append(d)
+    return out
+
+
+def update_expediente(eid: int, by_lawyer_id: Optional[int] = None, **fields) -> Optional[dict]:
+    """Campos válidos: alcance, area, honorarios_cop, honorarios_modalidad,
+    honorarios_descripcion, obligaciones_cliente, estado, closed_reason."""
+    if not fields: return get_expediente(eid)
+    allowed = {"alcance","area","honorarios_cop","honorarios_modalidad",
+               "honorarios_descripcion","obligaciones_cliente","estado","closed_reason"}
+    fields = {k:v for k,v in fields.items() if k in allowed}
+    if not fields: return get_expediente(eid)
+    with db() as c:
+        prev = c.execute("SELECT estado, audit_log FROM expedientes WHERE id=?", (eid,)).fetchone()
+        if not prev: return None
+        cols = ", ".join(f"{k}=?" for k in fields)
+        c.execute(f"UPDATE expedientes SET {cols} WHERE id=?", (*fields.values(), eid))
+        # bitácora
+        evento = "estado.cambiado" if "estado" in fields and fields["estado"] != prev["estado"] else "expediente.modificado"
+        new_log = _audit_append(prev["audit_log"], evento,
+                                 by_lawyer_id=by_lawyer_id, cambios=list(fields.keys()),
+                                 from_state=prev["estado"] if "estado" in fields else None,
+                                 to_state=fields.get("estado"))
+        c.execute("UPDATE expedientes SET audit_log=? WHERE id=?", (new_log, eid))
+        if fields.get("estado") == "cerrado":
+            c.execute("UPDATE expedientes SET closed_at=datetime('now') WHERE id=?", (eid,))
+    return get_expediente(eid)
+
+
+def expediente_set_otp(eid: int, otp: str, ttl_seconds: int = 1800,
+                       by_lawyer_id: Optional[int] = None,
+                       phone: Optional[str] = None) -> None:
+    """Guarda OTP con expiración (default 30 min) y registra envío en bitácora."""
+    expires = datetime.now().timestamp() + ttl_seconds
+    with db() as c:
+        prev = c.execute("SELECT audit_log FROM expedientes WHERE id=?", (eid,)).fetchone()
+        new_log = _audit_append(prev["audit_log"] if prev else None,
+                                 "otp.enviado_cliente",
+                                 by_lawyer_id=by_lawyer_id, phone=phone, ttl_seconds=ttl_seconds)
+        c.execute(
+            """UPDATE expedientes
+               SET otp=?, otp_expires=?, estado='pendiente_aceptacion',
+                   audit_log=?, otp_attempts=0
+               WHERE id=?""",
+            (otp, str(expires), new_log, eid),
+        )
+
+
+def expediente_verificar_otp(token: str, otp_in: str, ip: str = "") -> dict:
+    """Retorna {ok, expediente|error}. Marca aceptado_at + IP si OK."""
+    with db() as c:
+        r = c.execute("SELECT * FROM expedientes WHERE token=?", (token,)).fetchone()
+        if not r: return {"ok": False, "error": "Expediente no encontrado"}
+        if r["estado"] != "pendiente_aceptacion":
+            return {"ok": False, "error": f"Estado inválido: {r['estado']}"}
+        if r["otp_attempts"] >= 5:
+            return {"ok": False, "error": "Demasiados intentos. Solicita reenvío."}
+        # validar TTL
+        try: expires = float(r["otp_expires"] or 0)
+        except: expires = 0
+        if datetime.now().timestamp() > expires:
+            return {"ok": False, "error": "El código expiró. Solicita uno nuevo."}
+        if (otp_in or "").strip() != (r["otp"] or ""):
+            c.execute("UPDATE expedientes SET otp_attempts = otp_attempts+1 WHERE id=?", (r["id"],))
+            return {"ok": False, "error": "Código incorrecto."}
+        # OK!
+        new_log = _audit_append(r["audit_log"], "otp.aceptado_cliente",
+                                 ip=ip[:64], intento=(r["otp_attempts"] or 0) + 1)
+        c.execute(
+            """UPDATE expedientes
+               SET estado='aceptado', accepted_at=datetime('now'), accepted_ip=?,
+                   otp=NULL, otp_expires=NULL, audit_log=?
+               WHERE id=?""",
+            (ip[:64], new_log, r["id"]),
+        )
+    return {"ok": True, "expediente": get_expediente(r["id"])}
+
+
+def expediente_log_evento(eid: int, evento: str, **data) -> None:
+    """Helper genérico para que cualquier parte del sistema agregue al audit_log."""
+    with db() as c:
+        r = c.execute("SELECT audit_log FROM expedientes WHERE id=?", (eid,)).fetchone()
+        if not r: return
+        new_log = _audit_append(r["audit_log"], evento, **data)
+        c.execute("UPDATE expedientes SET audit_log=? WHERE id=?", (new_log, eid))
+
+
+def get_expediente_by_lead(lead_id: int) -> Optional[dict]:
+    with db() as c:
+        r = c.execute("SELECT id FROM expedientes WHERE lead_id=? ORDER BY created_at DESC LIMIT 1",
+                      (lead_id,)).fetchone()
+        return get_expediente(r["id"]) if r else None
 
 
 # ── Migración suave (columnas nuevas en lawyers existentes) ──────────────────

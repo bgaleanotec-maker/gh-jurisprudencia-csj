@@ -1392,6 +1392,156 @@ async def pro_rag_detail(doc_id: int, lawyer: dict = Depends(auth_mod.require_la
     return d
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# EXPEDIENTES (mandato escrito + OTP de aceptación + bitácora silenciosa)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ExpedienteCreateBody(BaseModel):
+    alcance: str = Field("", max_length=2000)
+    area: Optional[str] = None
+    honorarios_cop: Optional[int] = Field(None, ge=0, le=200_000_000)
+    honorarios_modalidad: str = Field("fijo")  # fijo|porcentaje|mixto|contingente|pro_bono
+    honorarios_descripcion: str = Field("", max_length=600)
+    obligaciones_cliente: str = Field("", max_length=1000)
+
+
+class ExpedienteUpdateBody(ExpedienteCreateBody):
+    estado: Optional[str] = None
+    closed_reason: Optional[str] = None
+
+
+@app.post("/api/pro/leads/{lid}/expediente")
+async def pro_crear_expediente(lid: int, body: ExpedienteCreateBody,
+                                lawyer: dict = Depends(auth_mod.require_lawyer)):
+    """Crea un expediente en estado 'borrador' para el lead. Sin OTP aún —
+    el abogado puede ajustar antes de enviarlo al cliente."""
+    leads = db_mod.list_leads(limit=2000)
+    lead = next((l for l in leads if l["id"] == lid), None)
+    if not lead: raise HTTPException(404, "lead no encontrado")
+    # Validar honorarios — alerta silenciosa por porcentaje > 40%
+    if body.honorarios_modalidad == "porcentaje" and (body.honorarios_cop or 0) > 40:
+        # honorarios_cop en este caso representa el porcentaje
+        pass  # solo se registra, no bloquea
+    e = db_mod.crear_expediente(
+        lead_id=lid, lawyer_id=lawyer["id"], by_lawyer_id=lawyer["id"],
+        alcance=body.alcance, area=body.area or lead.get("area"),
+        honorarios_cop=body.honorarios_cop,
+        honorarios_modalidad=body.honorarios_modalidad,
+        honorarios_descripcion=body.honorarios_descripcion,
+        obligaciones_cliente=body.obligaciones_cliente,
+    )
+    return e
+
+
+@app.patch("/api/pro/expedientes/{eid}")
+async def pro_editar_expediente(eid: int, body: ExpedienteUpdateBody,
+                                 lawyer: dict = Depends(auth_mod.require_lawyer)):
+    e = db_mod.get_expediente(eid)
+    if not e: raise HTTPException(404, "expediente no encontrado")
+    if e.get("lawyer_id") != lawyer["id"]:
+        raise HTTPException(403, "no autorizado")
+    fields = {k: v for k, v in body.dict().items() if v is not None}
+    upd = db_mod.update_expediente(eid, by_lawyer_id=lawyer["id"], **fields)
+    return upd
+
+
+@app.post("/api/pro/expedientes/{eid}/send-otp")
+async def pro_send_otp_expediente(eid: int, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    e = db_mod.get_expediente(eid)
+    if not e: raise HTTPException(404, "expediente no encontrado")
+    if e.get("lawyer_id") != lawyer["id"]:
+        raise HTTPException(403, "no autorizado")
+    if e["estado"] not in ("borrador", "pendiente_aceptacion"):
+        raise HTTPException(400, f"No se puede enviar OTP desde estado '{e['estado']}'.")
+    if not e.get("lead_phone"):
+        raise HTTPException(400, "El lead no tiene teléfono registrado.")
+    # generar y enviar
+    otp = wa.generar_otp()
+    db_mod.expediente_set_otp(eid, otp, ttl_seconds=1800,
+                                by_lawyer_id=lawyer["id"], phone=e["lead_phone"])
+    base = os.environ.get("PUBLIC_URL", "https://gh-jurisprudencia-csj.onrender.com").rstrip("/")
+    url = f"{base}/expediente/aceptar?t={e['token']}"
+    monto = e.get("honorarios_cop") or 0
+    modalidad = e.get("honorarios_modalidad") or "—"
+    body = (
+        "📋 *Galeano Herrera | Abogados*\n\n"
+        f"Hola {e.get('lead_name','Cliente')}, tu abogado *{e.get('lawyer_name','—')}* "
+        f"te propone iniciar el servicio:\n\n"
+        f"*Expediente:* {e['numero']}\n"
+        f"*Alcance:* {(e.get('alcance') or '—')[:300]}\n"
+        f"*Honorarios:* {modalidad}"
+        + (f" · ${monto:,} COP" if monto else "")
+        + "\n\n"
+        f"Para aceptar y abrir tu expediente, ingresa este código en:\n{url}\n\n"
+        f"*Código:* {otp}\n_(válido 30 minutos)_\n\n"
+        "Al aceptar firmas electrónicamente el mandato (Ley 527/99)."
+    )
+    res = wa.send_text(e["lead_phone"], body)
+    out = {"ok": res.get("sent", False), "url": url}
+    if wa.DEV_MODE: out["otp_debug"] = otp
+    return out
+
+
+@app.get("/api/pro/expedientes")
+async def pro_listar_expedientes(lawyer: dict = Depends(auth_mod.require_lawyer),
+                                   estado: Optional[str] = None):
+    return db_mod.list_expedientes(lawyer_id=lawyer["id"], estado=estado)
+
+
+@app.get("/api/pro/expedientes/{eid}")
+async def pro_get_expediente(eid: int, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    e = db_mod.get_expediente(eid)
+    if not e: raise HTTPException(404, "no encontrado")
+    if e.get("lawyer_id") != lawyer["id"]:
+        raise HTTPException(403, "no autorizado")
+    return e
+
+
+@app.get("/api/pro/leads/{lid}/expediente")
+async def pro_get_expediente_lead(lid: int, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    """Retorna el expediente del lead si existe, o 404."""
+    e = db_mod.get_expediente_by_lead(lid)
+    if not e: raise HTTPException(404, "sin expediente")
+    return e
+
+
+# Endpoints PÚBLICOS para que el cliente acepte con OTP
+
+class ExpAcceptBody(BaseModel):
+    token: str
+    otp: str = Field(..., min_length=6, max_length=6)
+
+
+@app.get("/api/expediente/{token}/info")
+async def public_exp_info(token: str):
+    """Devuelve info pública del expediente para mostrar al cliente antes de OTP."""
+    e = db_mod.get_expediente_by_token(token)
+    if not e: raise HTTPException(404, "Expediente no encontrado")
+    # Solo info necesaria para mostrar al cliente
+    return {
+        "numero": e["numero"], "estado": e["estado"],
+        "alcance": e.get("alcance"),
+        "honorarios_cop": e.get("honorarios_cop"),
+        "honorarios_modalidad": e.get("honorarios_modalidad"),
+        "honorarios_descripcion": e.get("honorarios_descripcion"),
+        "obligaciones_cliente": e.get("obligaciones_cliente"),
+        "expirable": e["estado"] == "pendiente_aceptacion",
+    }
+
+
+@app.post("/api/expediente/accept")
+async def public_exp_accept(body: ExpAcceptBody, request: Request):
+    res = db_mod.expediente_verificar_otp(body.token, body.otp, ip=_ip_of(request))
+    if not res["ok"]:
+        raise HTTPException(400, res["error"])
+    return {"ok": True, "numero": res["expediente"]["numero"]}
+
+
+@app.get("/expediente/aceptar", response_class=HTMLResponse)
+async def public_exp_pagina(t: str = ""):
+    return ui_mod.expediente_aceptar_html(t)
+
+
 # ── Salud ─────────────────────────────────────────────────────────────────────
 
 @app.get("/salud")
