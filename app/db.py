@@ -136,6 +136,40 @@ def init_db() -> None:
             count INTEGER NOT NULL,
             PRIMARY KEY (ip, window_start)
         );
+
+        -- Cerebro RAG: documentos cargados por admin/abogados (PDF transformados con IA)
+        CREATE TABLE IF NOT EXISTS rag_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            file_size INTEGER,
+            doc_type TEXT,                  -- sentencia | ley | doctrina | otro
+            metadata TEXT,                  -- JSON: sala, radicado, año, areas, temas, tesis (extraído por IA)
+            uploaded_by_lawyer_id INTEGER REFERENCES lawyers(id),
+            uploaded_by_admin INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'uploaded',
+                -- uploaded | processing | processed | approved | rejected | error
+            chunks_count INTEGER NOT NULL DEFAULT 0,
+            tokens_est INTEGER NOT NULL DEFAULT 0,
+            error TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            processed_at TEXT,
+            approved_at TEXT,
+            approved_by TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_rag_docs_status ON rag_documents(status);
+
+        CREATE TABLE IF NOT EXISTS rag_chunks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_id INTEGER NOT NULL REFERENCES rag_documents(id) ON DELETE CASCADE,
+            chunk_index INTEGER NOT NULL,
+            page INTEGER,
+            texto TEXT NOT NULL,
+            tokens_est INTEGER NOT NULL DEFAULT 0,
+            active INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc ON rag_chunks(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_rag_chunks_active ON rag_chunks(active);
         """)
 
 
@@ -623,6 +657,139 @@ def daily_counts(days: int = 14) -> list[dict]:
         for r in rows:
             agg.setdefault(r["d"], {})[r["type"]] = r["c"]
         return [{"date": d, **counts} for d, counts in agg.items()]
+
+
+# ── Cerebro RAG (PDFs cargados) ───────────────────────────────────────────────
+
+def create_rag_document(filename: str, file_size: int, uploaded_by_lawyer_id: Optional[int],
+                        uploaded_by_admin: bool, doc_type: str = "otro") -> int:
+    with db() as c:
+        cur = c.execute(
+            """INSERT INTO rag_documents(filename, file_size, doc_type,
+                                          uploaded_by_lawyer_id, uploaded_by_admin, status)
+               VALUES(?,?,?,?,?, 'uploaded')""",
+            (filename, file_size, doc_type, uploaded_by_lawyer_id, 1 if uploaded_by_admin else 0),
+        )
+        return cur.lastrowid
+
+
+def update_rag_document(doc_id: int, **fields) -> None:
+    """Campos válidos: status, metadata, chunks_count, tokens_est, error, notes,
+    processed_at, approved_at, approved_by, doc_type."""
+    if not fields:
+        return
+    if "metadata" in fields and not isinstance(fields["metadata"], str):
+        fields["metadata"] = json.dumps(fields["metadata"], ensure_ascii=False)
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with db() as c:
+        c.execute(f"UPDATE rag_documents SET {cols} WHERE id=?", (*fields.values(), doc_id))
+
+
+def get_rag_document(doc_id: int) -> Optional[dict]:
+    with db() as c:
+        r = c.execute("SELECT * FROM rag_documents WHERE id=?", (doc_id,)).fetchone()
+        if not r: return None
+        d = dict(r)
+        try:
+            d["metadata"] = json.loads(d.get("metadata") or "{}")
+        except Exception:
+            d["metadata"] = {}
+        return d
+
+
+def list_rag_documents(status: Optional[str] = None, limit: int = 200,
+                       lawyer_id: Optional[int] = None) -> list[dict]:
+    sql = """SELECT d.*, l.name as lawyer_name
+             FROM rag_documents d
+             LEFT JOIN lawyers l ON l.id = d.uploaded_by_lawyer_id
+             WHERE 1=1"""
+    params: list = []
+    if status:    sql += " AND d.status=?";  params.append(status)
+    if lawyer_id: sql += " AND d.uploaded_by_lawyer_id=?"; params.append(lawyer_id)
+    sql += " ORDER BY d.created_at DESC LIMIT ?"; params.append(limit)
+    out = []
+    with db() as c:
+        for r in c.execute(sql, params):
+            d = dict(r)
+            try: d["metadata"] = json.loads(d.get("metadata") or "{}")
+            except Exception: d["metadata"] = {}
+            out.append(d)
+    return out
+
+
+def delete_rag_document(doc_id: int) -> None:
+    with db() as c:
+        c.execute("DELETE FROM rag_chunks WHERE doc_id=?", (doc_id,))
+        c.execute("DELETE FROM rag_documents WHERE id=?", (doc_id,))
+
+
+def add_rag_chunks(doc_id: int, chunks: list[dict]) -> int:
+    """Inserta chunks. Retorna cuántos quedaron almacenados."""
+    if not chunks: return 0
+    with db() as c:
+        for ch in chunks:
+            c.execute(
+                """INSERT INTO rag_chunks(doc_id, chunk_index, page, texto, tokens_est, active)
+                   VALUES(?,?,?,?,?, 1)""",
+                (doc_id, ch.get("chunk_index", 0), ch.get("page"), ch["texto"],
+                 ch.get("tokens_est") or len(ch["texto"]) // 4),
+            )
+    return len(chunks)
+
+
+def get_active_rag_chunks(only_approved: bool = True) -> list[dict]:
+    """Retorna todos los chunks activos para alimentar el RAG. Cada chunk con
+    el formato compatible con fichas (id, texto_busqueda, tipo, areas, ...)."""
+    sql = """SELECT c.id, c.doc_id, c.chunk_index, c.page, c.texto, c.tokens_est,
+                    d.filename, d.metadata, d.doc_type, d.status as doc_status
+             FROM rag_chunks c
+             JOIN rag_documents d ON d.id = c.doc_id
+             WHERE c.active = 1"""
+    if only_approved:
+        sql += " AND d.status = 'approved'"
+    out = []
+    with db() as c:
+        for r in c.execute(sql):
+            try: meta = json.loads(r["metadata"] or "{}")
+            except Exception: meta = {}
+            tipo = meta.get("tipo") or r["doc_type"] or "doc"
+            radicado = meta.get("radicado") or f"DOC{r['doc_id']}-{r['chunk_index']}"
+            out.append({
+                "id": f"{radicado}-c{r['chunk_index']}",
+                "tipo": tipo,
+                "sala": meta.get("sala", "—"),
+                "anio": meta.get("anio") or meta.get("año"),
+                "areas": meta.get("areas") or [],
+                "temas": meta.get("temas") or [],
+                "tesis": meta.get("tesis"),
+                "texto_busqueda": r["texto"],
+                "tokens_est": r["tokens_est"],
+                "doc_id": r["doc_id"],
+                "doc_filename": r["filename"],
+                "page": r["page"],
+                "_source": "rag_chunks",
+            })
+    return out
+
+
+def rag_stats() -> dict:
+    with db() as c:
+        total_docs = c.execute("SELECT COUNT(*) c FROM rag_documents").fetchone()["c"]
+        pending = c.execute("SELECT COUNT(*) c FROM rag_documents WHERE status IN ('uploaded','processing','processed')").fetchone()["c"]
+        approved = c.execute("SELECT COUNT(*) c FROM rag_documents WHERE status='approved'").fetchone()["c"]
+        chunks = c.execute("SELECT COUNT(*) c FROM rag_chunks WHERE active=1").fetchone()["c"]
+        chunks_appr = c.execute(
+            """SELECT COUNT(*) c FROM rag_chunks ch
+               JOIN rag_documents d ON d.id=ch.doc_id
+               WHERE ch.active=1 AND d.status='approved'"""
+        ).fetchone()["c"]
+    return {
+        "total_documents": total_docs,
+        "pending_approval": pending,
+        "approved": approved,
+        "total_chunks": chunks,
+        "chunks_in_rag": chunks_appr,
+    }
 
 
 # ── Migración suave (columnas nuevas en lawyers existentes) ──────────────────

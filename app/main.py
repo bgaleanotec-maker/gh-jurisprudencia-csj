@@ -30,7 +30,7 @@ from typing import Optional
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from fastapi import FastAPI, HTTPException, Query, Depends, Request, Response, status, Form, Cookie
+from fastapi import FastAPI, HTTPException, Query, Depends, Request, Response, status, Form, Cookie, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -53,6 +53,7 @@ from app import ui as ui_mod
 from app import agenda as ag
 from app import auth as auth_mod
 from app import og_image as og_mod
+from app import rag_ingest as rag_in
 
 # ── App ────────────────────────────────────────────────────────────────────────
 
@@ -1137,6 +1138,189 @@ async def cron_reminders(t: str = ""):
             except Exception as e:
                 print(f"[cron] reminder {w} error: {e}")
     return {"ok": True, "sent": sent}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CEREBRO RAG: carga, transformación con IA y administración de PDFs
+# ─────────────────────────────────────────────────────────────────────────────
+
+MAX_PDF_SIZE = 25 * 1024 * 1024  # 25 MB
+
+
+async def _process_uploaded_pdfs(files: list[UploadFile], lawyer_id: Optional[int],
+                                  by_admin: bool, doc_type: str = "otro") -> list[dict]:
+    """Procesa una lista de PDFs: extrae texto, fichas con IA, guarda en DB."""
+    out = []
+    motor = None
+    try: motor = get_motor()
+    except HTTPException: motor = None
+
+    for upload in files:
+        if not upload.filename.lower().endswith(".pdf"):
+            out.append({"filename": upload.filename, "ok": False, "error": "Solo se aceptan PDFs."}); continue
+        data = await upload.read()
+        if len(data) > MAX_PDF_SIZE:
+            out.append({"filename": upload.filename, "ok": False,
+                        "error": f"Archivo demasiado grande (>25 MB)."}); continue
+
+        # Crear documento en estado uploaded
+        doc_id = db_mod.create_rag_document(
+            filename=upload.filename, file_size=len(data),
+            uploaded_by_lawyer_id=lawyer_id, uploaded_by_admin=by_admin, doc_type=doc_type,
+        )
+        db_mod.update_rag_document(doc_id, status="processing")
+
+        try:
+            res = rag_in.procesar_pdf(data, upload.filename, motor=motor)
+            chunks_count = db_mod.add_rag_chunks(doc_id, res["chunks"])
+            db_mod.update_rag_document(doc_id,
+                status="processed",
+                metadata=res["metadata"],
+                chunks_count=chunks_count,
+                tokens_est=res["tokens_est"],
+                processed_at=datetime.now().isoformat(),
+                doc_type=res["metadata"].get("tipo") or doc_type,
+            )
+            out.append({"filename": upload.filename, "ok": True, "doc_id": doc_id,
+                        "chunks": chunks_count, "metadata": res["metadata"]})
+        except Exception as e:
+            db_mod.update_rag_document(doc_id, status="error", error=str(e))
+            out.append({"filename": upload.filename, "ok": False, "error": str(e)})
+    return out
+
+
+# Endpoints ADMIN
+
+@app.post("/api/admin/rag/upload", dependencies=[Depends(admin_auth)])
+async def admin_rag_upload(files: list[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(400, "Sin archivos")
+    res = await _process_uploaded_pdfs(files, lawyer_id=None, by_admin=True)
+    return {"ok": True, "results": res}
+
+
+@app.get("/api/admin/rag/documents", dependencies=[Depends(admin_auth)])
+async def admin_rag_list(status: Optional[str] = None, limit: int = 200):
+    docs = db_mod.list_rag_documents(status=status, limit=limit)
+    # quitar chunks (pesa) del listado
+    for d in docs:
+        d.pop("error", None) if not d.get("error") else None
+    return {"documents": docs, "stats": db_mod.rag_stats()}
+
+
+@app.get("/api/admin/rag/documents/{doc_id}", dependencies=[Depends(admin_auth)])
+async def admin_rag_detail(doc_id: int):
+    d = db_mod.get_rag_document(doc_id)
+    if not d: raise HTTPException(404, "doc no encontrado")
+    # adjuntar chunks (preview de los primeros 5)
+    with db_mod.db() as c:
+        rows = c.execute(
+            "SELECT chunk_index, page, texto FROM rag_chunks WHERE doc_id=? ORDER BY chunk_index LIMIT 6",
+            (doc_id,)
+        ).fetchall()
+    d["chunks_preview"] = [{"chunk_index": r["chunk_index"], "page": r["page"],
+                            "texto": r["texto"][:600] + ("…" if len(r["texto"])>600 else "")}
+                           for r in rows]
+    return d
+
+
+class RagApprovalBody(BaseModel):
+    notes: Optional[str] = None
+
+
+@app.post("/api/admin/rag/documents/{doc_id}/approve", dependencies=[Depends(admin_auth)])
+async def admin_rag_approve(doc_id: int, body: RagApprovalBody = None):
+    d = db_mod.get_rag_document(doc_id)
+    if not d: raise HTTPException(404, "doc no encontrado")
+    if d["status"] not in ("processed", "rejected"):
+        raise HTTPException(400, f"No se puede aprobar desde estado '{d['status']}'.")
+    db_mod.update_rag_document(doc_id, status="approved",
+                                approved_at=datetime.now().isoformat(),
+                                approved_by="admin",
+                                notes=(body.notes if body else None))
+    # Forzar recarga del motor para que los nuevos chunks aparezcan en BM25
+    global _motor, _motor_lite
+    _motor = None; _motor_lite = None
+    return {"ok": True}
+
+
+@app.post("/api/admin/rag/documents/{doc_id}/reject", dependencies=[Depends(admin_auth)])
+async def admin_rag_reject(doc_id: int, body: RagApprovalBody = None):
+    d = db_mod.get_rag_document(doc_id)
+    if not d: raise HTTPException(404, "doc no encontrado")
+    db_mod.update_rag_document(doc_id, status="rejected",
+                                notes=(body.notes if body else None))
+    global _motor, _motor_lite
+    _motor = None; _motor_lite = None
+    return {"ok": True}
+
+
+@app.delete("/api/admin/rag/documents/{doc_id}", dependencies=[Depends(admin_auth)])
+async def admin_rag_delete(doc_id: int):
+    d = db_mod.get_rag_document(doc_id)
+    if not d: raise HTTPException(404, "doc no encontrado")
+    db_mod.delete_rag_document(doc_id)
+    global _motor, _motor_lite
+    _motor = None; _motor_lite = None
+    return {"ok": True}
+
+
+@app.post("/api/admin/rag/reindex", dependencies=[Depends(admin_auth)])
+async def admin_rag_reindex():
+    """Regenera el índice FAISS desde 0 (incluyendo fichas CSJ + chunks aprobados)."""
+    api_key = obtener_api_key()
+    if not api_key:
+        raise HTTPException(503, "GEMINI_API_KEY no configurada.")
+    # Por ahora reusa el endpoint de indexar (que lee fichas_index.jsonl).
+    # En el futuro podemos hacer indexación incremental de los chunks aprobados.
+    motor = MotorRAG(api_key=api_key)
+    n = motor.indexar(forzar=True)
+    global _motor
+    _motor = motor
+    return {"ok": True, "fichas_indexadas": n,
+            "chunks_aprobados": db_mod.rag_stats()["chunks_in_rag"]}
+
+
+# Endpoints PRO (abogado autenticado puede subir, ver, NO aprobar)
+
+@app.post("/api/pro/rag/upload")
+async def pro_rag_upload(files: list[UploadFile] = File(...),
+                          lawyer: dict = Depends(auth_mod.require_lawyer)):
+    if not files:
+        raise HTTPException(400, "Sin archivos")
+    res = await _process_uploaded_pdfs(files, lawyer_id=lawyer["id"], by_admin=False)
+    return {"ok": True, "results": res}
+
+
+@app.get("/api/pro/rag/documents")
+async def pro_rag_list(only_mine: bool = False,
+                        lawyer: dict = Depends(auth_mod.require_lawyer)):
+    docs = db_mod.list_rag_documents(
+        lawyer_id=lawyer["id"] if only_mine else None
+    )
+    # los abogados ven solo: sus propios docs (cualquier estado) + los aprobados de todos
+    if not only_mine:
+        docs = [d for d in docs
+                if d["status"] == "approved" or d.get("uploaded_by_lawyer_id") == lawyer["id"]]
+    return {"documents": docs, "stats": db_mod.rag_stats()}
+
+
+@app.get("/api/pro/rag/documents/{doc_id}")
+async def pro_rag_detail(doc_id: int, lawyer: dict = Depends(auth_mod.require_lawyer)):
+    d = db_mod.get_rag_document(doc_id)
+    if not d: raise HTTPException(404, "doc no encontrado")
+    # permiso: aprobado para todos, o suyo en cualquier estado
+    if d["status"] != "approved" and d.get("uploaded_by_lawyer_id") != lawyer["id"]:
+        raise HTTPException(403, "No autorizado")
+    with db_mod.db() as c:
+        rows = c.execute(
+            "SELECT chunk_index, page, texto FROM rag_chunks WHERE doc_id=? ORDER BY chunk_index LIMIT 6",
+            (doc_id,)
+        ).fetchall()
+    d["chunks_preview"] = [{"chunk_index": r["chunk_index"], "page": r["page"],
+                            "texto": r["texto"][:600] + ("…" if len(r["texto"])>600 else "")}
+                           for r in rows]
+    return d
 
 
 # ── Salud ─────────────────────────────────────────────────────────────────────

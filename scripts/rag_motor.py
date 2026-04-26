@@ -262,40 +262,46 @@ class MotorRAG:
 
     # ── Carga de datos ────────────────────────────────────────────────────────
 
+    def _cargar_chunks_db(self) -> list[dict]:
+        """Trae los chunks de PDFs APROBADOS desde la SQLite, en formato compatible
+        con las fichas. Falla silenciosamente si no hay DB o si la app no se importa."""
+        try:
+            import sys, os
+            ROOT = Path(__file__).parent.parent
+            if str(ROOT) not in sys.path:
+                sys.path.insert(0, str(ROOT))
+            from app import db as _db_mod  # type: ignore
+            return _db_mod.get_active_rag_chunks(only_approved=True)
+        except Exception:
+            return []
+
     def _cargar_meta(self) -> None:
+        # 1) Fichas CSJ (de pickle si está, si no del JSONL fuente)
+        fichas: list[dict] = []
         if FICHAS_META.exists():
             try:
                 with open(FICHAS_META, "rb") as f:
-                    self.meta = pickle.load(f)
-                return
+                    fichas = pickle.load(f)
             except Exception:
-                pass
-        if INDEX_FILE.exists():
-            fichas = []
+                fichas = []
+        if not fichas and INDEX_FILE.exists():
             with open(INDEX_FILE, encoding="utf-8") as f:
                 for linea in f:
-                    try:
-                        fichas.append(json.loads(linea))
-                    except json.JSONDecodeError:
-                        continue
-            self.meta = fichas
+                    try: fichas.append(json.loads(linea))
+                    except json.JSONDecodeError: continue
+        # 2) Chunks de PDFs aprobados (cerebro extendido)
+        custom = self._cargar_chunks_db()
+        # Fusión: fichas primero (su FAISS está calibrado contra ellas), custom al final.
+        # Si hay FAISS válido, los custom usan SOLO BM25 hasta el próximo --indexar.
+        self._n_csj_fichas = len(fichas)
+        self._n_custom_chunks = len(custom)
+        self.meta = list(fichas) + list(custom)
 
     def _cargar_indices(self) -> None:
-        # Cargar BM25 (siempre disponible si hay metadatos)
-        if BM25_FILE.exists():
-            try:
-                with open(BM25_FILE, "rb") as f:
-                    self.bm25 = pickle.load(f)
-            except Exception:
-                self.bm25 = None
-        if self.bm25 is None and self.meta:
+        # BM25 SIEMPRE se reconstruye en memoria sobre self.meta (incluye custom chunks).
+        # No usamos cache disco para BM25 porque el catálogo es dinámico (PDFs nuevos).
+        if self.meta:
             self.bm25 = BM25([tokenizar(f.get("texto_busqueda","")) for f in self.meta])
-            try:
-                BM25_FILE.parent.mkdir(parents=True, exist_ok=True)
-                with open(BM25_FILE, "wb") as f:
-                    pickle.dump(self.bm25, f)
-            except Exception:
-                pass
 
         # Cargar FAISS sólo si es válido
         if INVALID_FLG.exists():

@@ -1346,6 +1346,14 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
   .spinner{display:none;text-align:center;padding:14px;color:#002347;font-size:13px;}
   .spinner.on{display:block;}
   .badge-fch{background:#e3f0ff;color:#004a9f;padding:2px 6px;border-radius:8px;font-size:10px;font-weight:700;margin:2px;display:inline-block;}
+  /* Cerebro RAG (pro) */
+  .dropzone-pro{border:2px dashed #C5A059;border-radius:10px;padding:28px 16px;text-align:center;
+                cursor:pointer;background:#fefae8;transition:all .15s;margin-bottom:14px;}
+  .dropzone-pro:hover, .dropzone-pro.drag{background:#fdf6dc;border-color:#a88440;}
+  .upload-row{background:#f6f8fb;padding:8px 12px;border-radius:6px;margin-bottom:6px;font-size:12px;}
+  .upload-row.ok{background:#dcfce7;color:#166534;}
+  .upload-row.err{background:#ffebee;color:#b71c1c;}
+
   /* SCHEDULE editor */
   .schedule-grid{display:flex;flex-direction:column;gap:8px;}
   .sch-day{display:grid;grid-template-columns:120px 80px 1fr;gap:12px;align-items:start;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;}
@@ -1445,6 +1453,7 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
     <div class="tab" onclick="tab('leads')">👥 Mis Leads</div>
     <div class="tab" onclick="tab('rag')">⚖ Asistente Jurídico</div>
     <div class="tab" onclick="tab('horario')">⏰ Horario</div>
+    <div class="tab" onclick="tab('cerebro')">🧠 Cerebro RAG</div>
     <div class="tab" onclick="tab('config')">🔧 Cuenta</div>
   </div>
 
@@ -1532,6 +1541,45 @@ def lawyer_dashboard_html(lawyer: dict) -> str:
     </div>
   </div>
 
+  <!-- CEREBRO RAG (vista del abogado) -->
+  <div class="panel" id="p-cerebro">
+    <div style="margin-bottom:14px">
+      <h3 style="color:#002347;margin-bottom:4px">🧠 Cerebro RAG · Documentos del despacho</h3>
+      <div style="font-size:13px;color:#6b7280">Sube sentencias, leyes o doctrina que quieras que el motor IA considere. El admin las revisa y aprueba antes de que entren al RAG.</div>
+    </div>
+
+    <!-- Drag & drop pro -->
+    <div class="dropzone-pro" id="dropzone-pro">
+      <input type="file" id="file-input-pro" multiple accept="application/pdf" style="display:none" onchange="proUploadFiles(this.files)">
+      <div style="font-size:36px;margin-bottom:8px">📤</div>
+      <div style="font-weight:700;color:#002347;margin-bottom:4px">Arrastra PDFs aquí o haz click</div>
+      <div style="font-size:12px;color:#6b7280">Sentencias, leyes, doctrina · max 25 MB c/u · Quedan en revisión por admin antes de entrar al RAG</div>
+    </div>
+    <div id="upload-progress-pro"></div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 10px">
+      <h4 style="color:#002347;margin:0">Documentos disponibles</h4>
+      <select id="rag-filter-pro" onchange="proLoadRag()" style="width:200px">
+        <option value="">Todos visibles</option>
+        <option value="mine">Solo los que yo subí</option>
+      </select>
+    </div>
+
+    <div style="overflow-x:auto"><table id="t-pro-rag"><thead><tr>
+      <th>Archivo</th><th>Tipo</th><th>Sala / Radicado</th><th>Áreas</th>
+      <th>Estado</th><th>Subido por</th><th></th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <!-- Modal: Detalle del documento RAG (pro) -->
+  <div class="modal-bg" id="m-pro-rag">
+    <div class="modal" style="max-width:780px">
+      <span class="modal-close" onclick="cerrarModalesPro()">×</span>
+      <h3 style="color:#002347" id="m-pro-rag-title">Detalle</h3>
+      <div id="m-pro-rag-body"></div>
+    </div>
+  </div>
+
   <!-- CONFIG -->
   <div class="panel" id="p-config">
     <h3 style="margin-bottom:14px;color:#002347">Datos de mi cuenta</h3>
@@ -1566,6 +1614,101 @@ function tab(name){
   if(name==='agenda'){loadCal(); loadAppts();}
   if(name==='config')loadMe();
   if(name==='horario')cargarHorario();
+  if(name==='cerebro')proLoadRag();
+}
+
+// ─── Cerebro RAG (vista abogado) ────────────────────────────────────────
+const PRO_STATUS = {
+  uploaded:    {l:'Subido', c:'#6b7280', bg:'#f3f4f6'},
+  processing:  {l:'Procesando…', c:'#92400e', bg:'#fef3c7'},
+  processed:   {l:'⏳ En revisión admin', c:'#1e40af', bg:'#dbeafe'},
+  approved:    {l:'✅ En el RAG', c:'#166534', bg:'#dcfce7'},
+  rejected:    {l:'❌ Rechazado', c:'#991b1b', bg:'#fee2e2'},
+  error:       {l:'⚠ Error', c:'#991b1b', bg:'#fee2e2'},
+};
+function cerrarModalesPro(){ document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('on')); }
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape') cerrarModalesPro(); });
+
+async function proLoadRag(){
+  const f = document.getElementById('rag-filter-pro').value;
+  const r = await api('/api/pro/rag/documents'+(f==='mine'?'?only_mine=true':''));
+  const tbody = document.querySelector('#t-pro-rag tbody');
+  if(!r.documents.length){
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#888;padding:30px">
+      No hay documentos. Sube uno arriba para alimentar el cerebro del despacho.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = r.documents.map(d=>{
+    const st = PRO_STATUS[d.status] || {l:d.status,c:'#666',bg:'#eee'};
+    const m = d.metadata || {};
+    const sl = (m.sala && m.sala !== '—') ? `${m.sala}${m.radicado?' · '+m.radicado:''}` : (m.radicado || '—');
+    const subido = d.uploaded_by_admin ? 'admin' : (d.lawyer_name || 'lawyer');
+    return `<tr>
+      <td><b>${d.filename}</b></td>
+      <td>${m.tipo || '—'}</td>
+      <td>${sl}</td>
+      <td>${(m.areas||[]).join(', ') || '—'}</td>
+      <td><span class="badge" style="background:${st.bg};color:${st.c}">${st.l}</span></td>
+      <td>${subido}</td>
+      <td><button class="btn btn-sm outline" onclick="proVerRag(${d.id})">Ver</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function proVerRag(id){
+  const d = await api('/api/pro/rag/documents/'+id);
+  const m = d.metadata || {};
+  document.getElementById('m-pro-rag-title').textContent = '📄 ' + d.filename;
+  document.getElementById('m-pro-rag-body').innerHTML = `
+    <div style="background:#f6f8fb;padding:14px;border-radius:8px;margin-bottom:14px;font-size:13px">
+      <div><b>Tipo:</b> ${m.tipo || '—'}</div>
+      <div><b>Sala:</b> ${m.sala || '—'} · <b>Radicado:</b> ${m.radicado || '—'} · <b>Año:</b> ${m.anio || '—'}</div>
+      <div><b>Áreas:</b> ${(m.areas||[]).join(', ') || '—'}</div>
+      <div><b>Temas:</b> ${(m.temas||[]).join(' · ') || '—'}</div>
+      <div><b>Tesis:</b> <i>${m.tesis || '—'}</i></div>
+    </div>
+    <h4 style="color:#002347;margin-bottom:8px">Vista previa</h4>
+    ${(d.chunks_preview||[]).map(c=>`
+      <div style="background:#fafbfc;padding:12px;border-left:3px solid #C5A059;border-radius:0 6px 6px 0;margin-bottom:8px;font-family:Georgia,serif;font-size:12px;line-height:1.6">
+        <div style="font-size:10px;color:#6b7280;margin-bottom:4px">Chunk ${c.chunk_index} · página ${c.page}</div>
+        ${c.texto}
+      </div>`).join('')}
+  `;
+  document.getElementById('m-pro-rag').classList.add('on');
+}
+
+(function(){
+  const dz = document.getElementById('dropzone-pro');
+  if(!dz) return;
+  dz.addEventListener('click', ()=>document.getElementById('file-input-pro').click());
+  ['dragenter','dragover'].forEach(e=>dz.addEventListener(e, ev=>{ev.preventDefault();dz.classList.add('drag');}));
+  ['dragleave','drop'].forEach(e=>dz.addEventListener(e, ev=>{ev.preventDefault();dz.classList.remove('drag');}));
+  dz.addEventListener('drop', ev=>proUploadFiles(ev.dataTransfer.files));
+})();
+
+async function proUploadFiles(filelist){
+  if(!filelist || !filelist.length) return;
+  const cont = document.getElementById('upload-progress-pro');
+  cont.innerHTML = '';
+  const fd = new FormData();
+  for(const f of filelist){
+    fd.append('files', f);
+    cont.innerHTML += `<div class="upload-row">📄 ${f.name} · subiendo y transformando con IA…</div>`;
+  }
+  try{
+    const r = await fetch('/api/pro/rag/upload',{method:'POST',body:fd});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail||'Error');
+    cont.innerHTML = d.results.map(res=>{
+      const cls = res.ok ? 'ok' : 'err';
+      const txt = res.ok
+        ? `✅ ${res.filename} → ${res.chunks} chunks · queda en revisión por admin`
+        : `❌ ${res.filename} → ${res.error}`;
+      return `<div class="upload-row ${cls}">${txt}</div>`;
+    }).join('');
+    proLoadRag();
+  }catch(e){ cont.innerHTML = `<div class="upload-row err">❌ ${e.message}</div>`; }
+  document.getElementById('file-input-pro').value = '';
 }
 
 // ─── Schedule editor ─────────────────────────────────────────────────────
@@ -2504,6 +2647,20 @@ def admin_html() -> str:
   input:checked + .slider{background:#16a34a;}
   input:checked + .slider:before{transform:translateX(20px);}
 
+  /* Drag & drop · Cerebro RAG */
+  .dropzone{border:2px dashed #C5A059;border-radius:12px;padding:36px 20px;text-align:center;
+            cursor:pointer;background:#fefae8;transition:all .15s;}
+  .dropzone:hover, .dropzone.drag{background:#fdf6dc;border-color:#a88440;}
+  .dz-icon{font-size:48px;margin-bottom:10px;}
+  .dz-title{font-weight:700;color:#002347;font-size:16px;margin-bottom:4px;}
+  .dz-sub{font-size:12px;color:#6b7280;}
+  .upload-row{background:#f6f8fb;padding:10px 14px;border-radius:6px;margin-bottom:6px;font-size:13px;display:flex;justify-content:space-between;align-items:center;}
+  .upload-row.ok{background:#dcfce7;color:#166534;}
+  .upload-row.err{background:#ffebee;color:#b71c1c;}
+  .stat-mini{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px;text-align:center;}
+  .stat-mini .num{font-size:24px;font-weight:800;color:#002347;}
+  .stat-mini .lbl{font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-top:4px;}
+
   /* Schedule editor (mismo estilo que en pro dashboard) */
   .schedule-grid{display:flex;flex-direction:column;gap:8px;}
   .sch-day{display:grid;grid-template-columns:110px 70px 1fr;gap:12px;align-items:start;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;}
@@ -2539,6 +2696,7 @@ def admin_html() -> str:
     <div class="tab on" onclick="tab('leads')">📋 Leads</div>
     <div class="tab" onclick="tab('citas')">📅 Citas</div>
     <div class="tab" onclick="tab('lawyers')">⚖ Abogados</div>
+    <div class="tab" onclick="tab('cerebro')">🧠 Cerebro RAG</div>
     <div class="tab" onclick="tab('config')">🔧 Sistema</div>
   </div>
 
@@ -2647,6 +2805,53 @@ def admin_html() -> str:
     </div>
   </div>
 
+  <!-- CEREBRO RAG -->
+  <div class="panel" id="p-cerebro">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div>
+        <h3 style="color:#002347;margin-bottom:4px">🧠 Cerebro RAG · Documentos cargados</h3>
+        <div style="font-size:13px;color:#6b7280">Sube PDFs de sentencias, leyes, doctrina o piezas procesales. La IA los transformará automáticamente y, una vez aprobados, alimentarán el motor de búsqueda jurídica.</div>
+      </div>
+      <button class="btn outline" onclick="adminReindexarRAG()">🔄 Reindexar todo</button>
+    </div>
+
+    <div id="cerebro-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px"></div>
+
+    <!-- Drag & drop -->
+    <div class="dropzone" id="dropzone-admin">
+      <input type="file" id="file-input-admin" multiple accept="application/pdf" style="display:none" onchange="adminUploadFiles(this.files)">
+      <div class="dz-icon">📤</div>
+      <div class="dz-title">Arrastra PDFs aquí o haz click para seleccionar</div>
+      <div class="dz-sub">Sentencias, leyes, doctrina, piezas procesales — máx. 25 MB c/u</div>
+    </div>
+    <div id="upload-progress-admin"></div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 10px">
+      <h4 style="color:#002347;margin:0">Documentos</h4>
+      <select id="rag-filter-status" onchange="loadRagDocs()" style="width:200px">
+        <option value="">Todos los estados</option>
+        <option value="processed">Procesados (esperando aprobación)</option>
+        <option value="approved">Aprobados (en RAG)</option>
+        <option value="rejected">Rechazados</option>
+        <option value="error">Con error</option>
+      </select>
+    </div>
+
+    <div style="overflow-x:auto"><table id="t-rag-docs"><thead><tr>
+      <th>Archivo</th><th>Tipo</th><th>Sala / Radicado</th><th>Áreas</th>
+      <th>Chunks</th><th>Estado</th><th>Subido por</th><th>Fecha</th><th>Acciones</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <!-- Modal: Detalle del documento RAG -->
+  <div class="modal-bg" id="m-rag-detail">
+    <div class="modal" style="max-width:780px">
+      <span class="modal-close" onclick="cerrarModales()">×</span>
+      <h3 style="color:#002347" id="m-rag-title">Detalle</h3>
+      <div id="m-rag-body"></div>
+    </div>
+  </div>
+
   <div class="panel" id="p-config">
     <h3 style="margin-bottom:14px;color:#002347">Configuración del sistema</h3>
     <div id="cfg-info"></div>
@@ -2669,6 +2874,152 @@ function tab(name){
   if(name==='lawyers')loadLawyers();
   if(name==='citas')loadAppts();
   if(name==='config')loadConfig();
+  if(name==='cerebro')loadRagDocs();
+}
+
+// ─── Cerebro RAG (admin) ─────────────────────────────────────────────────
+const STATUS_LABEL = {
+  uploaded:    {l:'Subido', c:'#6b7280', bg:'#f3f4f6'},
+  processing:  {l:'Procesando', c:'#92400e', bg:'#fef3c7'},
+  processed:   {l:'⏳ Esperando aprobación', c:'#1e40af', bg:'#dbeafe'},
+  approved:    {l:'✅ En el RAG', c:'#166534', bg:'#dcfce7'},
+  rejected:    {l:'❌ Rechazado', c:'#991b1b', bg:'#fee2e2'},
+  error:       {l:'⚠ Error', c:'#991b1b', bg:'#fee2e2'},
+};
+
+async function loadRagDocs(){
+  const status = document.getElementById('rag-filter-status').value;
+  const r = await api('/api/admin/rag/documents'+(status?'?status='+status:''));
+  // stats
+  const s = r.stats || {};
+  document.getElementById('cerebro-stats').innerHTML = `
+    <div class="stat-mini"><div class="num">${s.total_documents||0}</div><div class="lbl">Documentos</div></div>
+    <div class="stat-mini"><div class="num" style="color:#1e40af">${s.pending_approval||0}</div><div class="lbl">Pendientes</div></div>
+    <div class="stat-mini"><div class="num" style="color:#16a34a">${s.approved||0}</div><div class="lbl">Aprobados</div></div>
+    <div class="stat-mini"><div class="num">${s.chunks_in_rag||0}</div><div class="lbl">Chunks en RAG</div></div>`;
+  // tabla
+  const tbody = document.querySelector('#t-rag-docs tbody');
+  if(!r.documents.length){
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#888;padding:30px">
+      No hay documentos. Arrastra PDFs arriba para empezar a alimentar el cerebro.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = r.documents.map(d=>{
+    const st = STATUS_LABEL[d.status] || {l:d.status,c:'#666',bg:'#eee'};
+    const meta = d.metadata || {};
+    const sala = meta.sala && meta.sala !== '—' ? meta.sala : '';
+    const rad = meta.radicado || '';
+    const sl = (sala||rad) ? `${sala}${sala&&rad?' · ':''}${rad}` : '<i style="color:#aaa">—</i>';
+    const areas = (meta.areas||[]).join(', ');
+    const subido = d.uploaded_by_admin ? 'admin' : (d.lawyer_name || `lawyer #${d.uploaded_by_lawyer_id}`);
+    return `<tr>
+      <td><b>${d.filename}</b><br><small style="color:#888">${(d.file_size/1024).toFixed(0)} KB</small></td>
+      <td>${meta.tipo || d.doc_type || '—'}</td>
+      <td>${sl}</td>
+      <td>${areas || '—'}</td>
+      <td>${d.chunks_count}</td>
+      <td><span class="badge" style="background:${st.bg};color:${st.c}">${st.l}</span></td>
+      <td>${subido}</td>
+      <td style="font-size:11px;color:#888">${(d.created_at||'').slice(0,16)}</td>
+      <td><div class="actions">
+        <button class="btn btn-sm outline" onclick="verRagDoc(${d.id})">Ver</button>
+        ${d.status === 'processed' ? `<button class="btn btn-sm green" onclick="aprobarRag(${d.id})">✓ Aprobar</button>
+                                       <button class="btn btn-sm" style="background:#92400e" onclick="rechazarRag(${d.id})">✗</button>` : ''}
+        ${d.status === 'rejected' ? `<button class="btn btn-sm green" onclick="aprobarRag(${d.id})">↻ Aprobar</button>` : ''}
+        <button class="btn btn-sm" style="background:#c8102e" onclick="borrarRag(${d.id})" title="Eliminar">×</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+// Drag & drop admin
+(function(){
+  const dz = document.getElementById('dropzone-admin');
+  if(!dz) return;
+  dz.addEventListener('click', ()=>document.getElementById('file-input-admin').click());
+  ['dragenter','dragover'].forEach(e=>dz.addEventListener(e, ev=>{ev.preventDefault();dz.classList.add('drag');}));
+  ['dragleave','drop'].forEach(e=>dz.addEventListener(e, ev=>{ev.preventDefault();dz.classList.remove('drag');}));
+  dz.addEventListener('drop', ev=>{ adminUploadFiles(ev.dataTransfer.files); });
+})();
+
+async function adminUploadFiles(filelist){
+  if(!filelist || !filelist.length) return;
+  const cont = document.getElementById('upload-progress-admin');
+  cont.innerHTML = '';
+  const fd = new FormData();
+  for(const f of filelist){
+    fd.append('files', f);
+    cont.innerHTML += `<div class="upload-row" id="up-${f.name.replace(/\W/g,'_')}">📄 ${f.name} · subiendo y transformando con IA…</div>`;
+  }
+  try{
+    const r = await fetch('/api/admin/rag/upload',{method:'POST',body:fd});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail||'Error');
+    cont.innerHTML = d.results.map(res=>{
+      const cls = res.ok ? 'ok' : 'err';
+      const txt = res.ok
+        ? `✅ ${res.filename} → ${res.chunks} chunks · tipo: ${(res.metadata||{}).tipo||'otro'} · radicado: ${(res.metadata||{}).radicado||'—'}`
+        : `❌ ${res.filename} → ${res.error}`;
+      return `<div class="upload-row ${cls}">${txt}</div>`;
+    }).join('');
+    loadRagDocs();
+  }catch(e){
+    cont.innerHTML = `<div class="upload-row err">❌ ${e.message}</div>`;
+  }
+  document.getElementById('file-input-admin').value = '';
+}
+
+async function verRagDoc(id){
+  const d = await api('/api/admin/rag/documents/'+id);
+  document.getElementById('m-rag-title').textContent = '📄 ' + d.filename;
+  const meta = d.metadata || {};
+  const chunks = d.chunks_preview || [];
+  document.getElementById('m-rag-body').innerHTML = `
+    <div style="background:#f6f8fb;padding:14px;border-radius:8px;margin-bottom:14px;font-size:13px">
+      <div><b>Tipo:</b> ${meta.tipo || '—'}</div>
+      <div><b>Sala:</b> ${meta.sala || '—'}</div>
+      <div><b>Radicado:</b> ${meta.radicado || '<i style="color:#aaa">no detectado</i>'}</div>
+      <div><b>Año:</b> ${meta.anio || '—'}</div>
+      <div><b>Áreas:</b> ${(meta.areas||[]).join(', ') || '—'}</div>
+      <div><b>Temas:</b> ${(meta.temas||[]).join(' · ') || '—'}</div>
+      <div><b>Tesis:</b> <i>${meta.tesis || '—'}</i></div>
+      <div><b>Resumen:</b> ${meta.resumen_corto || '—'}</div>
+      <div style="margin-top:8px;color:#6b7280;font-size:12px">Chunks generados: ${d.chunks_count} · Tokens estimados: ${d.tokens_est}</div>
+    </div>
+    <h4 style="color:#002347;margin-bottom:8px">Vista previa de chunks (primeros ${chunks.length})</h4>
+    ${chunks.map(c=>`
+      <div style="background:#fafbfc;padding:12px;border-left:3px solid #C5A059;border-radius:0 6px 6px 0;margin-bottom:8px;font-family:Georgia,serif;font-size:12px;line-height:1.6">
+        <div style="font-size:10px;color:#6b7280;margin-bottom:4px">Chunk ${c.chunk_index} · página ${c.page}</div>
+        ${c.texto}
+      </div>`).join('')}
+  `;
+  document.getElementById('m-rag-detail').classList.add('on');
+}
+
+async function aprobarRag(id){
+  const notes = prompt('Notas de aprobación (opcional):') || '';
+  await api('/api/admin/rag/documents/'+id+'/approve',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({notes})});
+  loadRagDocs();
+}
+async function rechazarRag(id){
+  const notes = prompt('Motivo del rechazo:'); if(notes === null) return;
+  await api('/api/admin/rag/documents/'+id+'/reject',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({notes})});
+  loadRagDocs();
+}
+async function borrarRag(id){
+  if(!confirm('¿Eliminar este documento del cerebro? Esta acción borra también sus chunks.')) return;
+  await api('/api/admin/rag/documents/'+id,{method:'DELETE'});
+  loadRagDocs();
+}
+async function adminReindexarRAG(){
+  if(!confirm('Esto regenera el índice FAISS desde 0 con todas las fichas + chunks aprobados. Puede consumir cuota de Gemini. ¿Continuar?')) return;
+  try{
+    const r = await api('/api/admin/rag/reindex',{method:'POST'});
+    alert(`✓ Reindexado · ${r.fichas_indexadas} fichas + ${r.chunks_aprobados} chunks aprobados`);
+    loadRagDocs();
+  }catch(e){ alert('Error: '+e.message); }
 }
 async function api(url,opts){
   const r=await fetch(url,opts);
