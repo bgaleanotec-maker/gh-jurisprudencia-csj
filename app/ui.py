@@ -107,11 +107,7 @@ def landing_html(config: dict = None) -> str:
 {fb_pixel_snippet}
 
 <title>Galeano Herrera · Tu tutela en 2 minutos, respaldada en la Corte Suprema</title>'''
-    return head_html + _landing_body(FB_PIXEL_ID, fb_pixel_noscript)
-
-
-def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
-    return """</head>
+    body_html = """</head>
 """ + fb_pixel_noscript + """
 <style>
   /* — Paleta basada en psicología del consumidor legal —
@@ -1299,6 +1295,7 @@ cargarStats();
 </script>
 </body>
 </html>"""
+    return head_html + body_html
 
 
 # =============================================================================
