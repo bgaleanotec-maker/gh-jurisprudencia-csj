@@ -7,10 +7,51 @@ from __future__ import annotations
 # LANDING PÚBLICA
 # =============================================================================
 
-def landing_html() -> str:
-    import os as _os
+def landing_html(config: dict = None) -> str:
+    """Renderiza la landing pública. Si se pasa config (dict de la tabla landings),
+    personaliza H1, subtítulo, video, CTA, áreas del carrusel, FAQ extra, etc."""
+    import os as _os, json as _j
+    cfg = config or {}
     FB_PIXEL_ID = (_os.environ.get("FB_PIXEL_ID") or "").strip()
     SITE_URL = (_os.environ.get("PUBLIC_URL") or "https://gh-jurisprudencia-csj.onrender.com").rstrip("/")
+
+    # Datos de la landing (default = home genérica)
+    SLUG = cfg.get("slug") or ""
+    H1 = cfg.get("h1") or "Te están negando un derecho"
+    H1_RES = cfg.get("h1_resaltado") or "negando un derecho"
+    SUBT = cfg.get("subtitulo") or "Describe tu caso. Cruzamos tu situación con sentencias reales de la Corte Suprema y te mostramos, en minutos, qué dice la ley y cuál es tu mejor camino."
+    VIDEO_URL = cfg.get("video_url") or ""
+    CTA_TXT = cfg.get("cta_texto") or "Conocer mi caso"
+    CASOS_FILTRO = cfg.get("casos_filtro") or []           # áreas a mostrar (lista vacía = todas)
+    CASOS_EXTRA = cfg.get("casos_extra") or []
+    FAQ_EXTRA = cfg.get("faq_extra") or []
+    AREA_FOCUS = cfg.get("area_focus") or ""
+    UTM_DEF = cfg.get("utm_default") or ""
+
+    # Si tiene H1 personalizado, lo usamos textual; el resaltado va en oro si aparece dentro
+    if H1_RES and H1_RES in H1:
+        idx = H1.find(H1_RES)
+        H1_HTML = (H1[:idx] + f'<span class="resaltar">{H1_RES}</span>' + H1[idx+len(H1_RES):])
+    else:
+        H1_HTML = H1
+
+    VIDEO_HTML = ""
+    if VIDEO_URL:
+        # Convertir youtu.be / watch?v= a embed
+        url = VIDEO_URL
+        if "youtu.be/" in url:
+            vid = url.split("youtu.be/")[-1].split("?")[0]
+            url = f"https://www.youtube.com/embed/{vid}"
+        elif "watch?v=" in url:
+            vid = url.split("watch?v=")[-1].split("&")[0]
+            url = f"https://www.youtube.com/embed/{vid}"
+        VIDEO_HTML = (
+            f'<section class="bloque" style="padding:32px 16px"><div class="container-wide">'
+            f'<div style="position:relative;padding-bottom:56.25%;height:0;border-radius:14px;overflow:hidden;box-shadow:var(--sombra)">'
+            f'<iframe src="{url}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" '
+            f'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
+            f'allowfullscreen></iframe></div></div></section>'
+        )
     fb_pixel_snippet = ""
     fb_pixel_noscript = ""
     if FB_PIXEL_ID:
@@ -354,14 +395,16 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
 </header>
 
 <header class="hero" role="banner">
-  <h1>Te están <span class="resaltar">negando un derecho</span>.<br>Aquí tienes cómo recuperarlo.</h1>
-  <p class="lead">Describe tu caso. Cruzamos tu situación con sentencias reales de la Corte Suprema y te mostramos, en minutos, qué dice la ley y cuál es tu mejor camino.</p>
+  <h1>""" + H1_HTML + """</h1>
+  <p class="lead">""" + SUBT + """</p>
   <div class="badges">
     <span class="badge-trust">Sentencias CSJ 2018–2025</span>
     <span class="badge-trust">Radicados verificables</span>
     <span class="badge-trust">Habeas Data · Ley 1581</span>
   </div>
 </header>
+
+""" + VIDEO_HTML + """
 
 <section class="stats-bar" aria-label="Estadísticas de la plataforma">
   <div class="grid">
@@ -558,7 +601,7 @@ def _landing_body(FB_PIXEL_ID: str, fb_pixel_noscript: str) -> str:
       </div>
       <div class="wiz-nav">
         <button class="btn-ghost" onclick="wizPrev(5)">← Volver</button>
-        <button class="btn" onclick="generarPreview()">Analizar mi caso ⚡</button>
+        <button class="btn" onclick="generarPreview()">""" + CTA_TXT + """ ⚡</button>
       </div>
     </div>
 
@@ -879,7 +922,26 @@ function modal(id){document.getElementById(id).classList.add('on');}
 function cerrarModal(){document.querySelectorAll('.modal-bg').forEach(m=>m.classList.remove('on'));}
 document.querySelectorAll('.modal-bg').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)cerrarModal();}));
 
+// Configuración inyectada desde la landing custom (si aplica)
+const LANDING_CFG = """ + _j.dumps({
+    "slug": SLUG, "area_focus": AREA_FOCUS,
+    "casos_filtro": CASOS_FILTRO, "casos_extra": CASOS_EXTRA,
+    "accionado_label": cfg.get("accionado_label") or "",
+    "accionado_placeholder": cfg.get("accionado_placeholder") or "",
+}) + """;
+
+// Capturar UTM de la URL para attribution
+const __utm = (() => {
+  const u = new URLSearchParams(location.search); const o = {};
+  ['utm_source','utm_medium','utm_campaign','utm_content','utm_term'].forEach(k=>{
+    const v = u.get(k); if(v) o[k] = v;
+  });
+  if(LANDING_CFG.slug) o.landing = LANDING_CFG.slug;
+  return o;
+})();
+
 async function track(type, payload){
+  payload = Object.assign({}, __utm, payload || {});
   try{await fetch('/api/track',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type,payload})});}catch(e){}
   // Facebook Pixel events si está cargado
   try{
@@ -975,6 +1037,23 @@ function scrollCases(dir){
   if(!s) return;
   s.scrollBy({left: dir * 320, behavior:'smooth'});
 }
+
+// Filtro de carrusel por área si la landing tiene casos_filtro definido
+(function(){
+  const filtro = LANDING_CFG.casos_filtro || [];
+  if(filtro.length){
+    document.querySelectorAll('.case-card').forEach(c=>{
+      if(!filtro.includes(c.dataset.area)) c.remove();
+    });
+  }
+  // Si la landing tiene area_focus, auto-seleccionarla en el wizard al cargar
+  if(LANDING_CFG.area_focus){
+    setTimeout(()=>{
+      const card = document.querySelector(`.tipo-card[data-area="${LANDING_CFG.area_focus}"]`);
+      if(card) card.click();
+    }, 200);
+  }
+})();
 
 // Click en case-card → preconfigura el wizard y salta a paso 4
 document.querySelectorAll('.case-card').forEach(c=>c.addEventListener('click',()=>{
@@ -2989,7 +3068,10 @@ def admin_html() -> str:
     <div class="tab on" onclick="tab('leads')">📋 Leads</div>
     <div class="tab" onclick="tab('citas')">📅 Citas</div>
     <div class="tab" onclick="tab('lawyers')">⚖ Abogados</div>
+    <div class="tab" onclick="tab('landings')">🏠 Landings</div>
+    <div class="tab" onclick="tab('jurisprudencia')">📚 Jurisprudencia</div>
     <div class="tab" onclick="tab('cerebro')">🧠 Cerebro RAG</div>
+    <div class="tab" onclick="tab('trafico')">📊 Tráfico</div>
     <div class="tab" onclick="tab('config')">🔧 Sistema</div>
   </div>
 
@@ -3154,6 +3236,127 @@ def admin_html() -> str:
     </div>
   </div>
 
+  <!-- LANDINGS -->
+  <div class="panel" id="p-landings">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div>
+        <h3 style="color:#002347;margin-bottom:4px">🏠 Landings multi-vertical</h3>
+        <div style="font-size:13px;color:#6b7280">Cada landing tiene su URL <code>/c/[slug]</code>, copy propio, video, carrusel filtrado por áreas y métricas independientes.</div>
+      </div>
+      <button class="btn green" onclick="abrirNuevaLanding()">+ Nueva landing</button>
+    </div>
+    <div style="overflow-x:auto"><table id="t-landings"><thead><tr>
+      <th>Slug · URL</th><th>Título</th><th>Área foco</th><th>Video</th>
+      <th>Visitas 30d</th><th>Leads 30d</th><th>Activa</th><th>Acciones</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <!-- JURISPRUDENCIA -->
+  <div class="panel" id="p-jurisprudencia">
+    <div style="margin-bottom:14px">
+      <h3 style="color:#002347;margin-bottom:4px">📚 Jurisprudencia indexada</h3>
+      <div style="font-size:13px;color:#6b7280">Vista de auditoría: las 625 fichas CSJ + chunks de PDFs aprobados. Todo lo que el motor RAG puede recuperar.</div>
+    </div>
+    <div id="jur-stats" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 2fr;gap:10px;margin-bottom:14px">
+      <div><label>Fuente</label><select id="jur-fuente" onchange="loadJur(1)">
+        <option value="">Todas</option><option value="csj">CSJ</option><option value="pdf">PDFs</option></select></div>
+      <div><label>Sala</label><select id="jur-sala" onchange="loadJur(1)">
+        <option value="">Todas</option><option value="CIVIL">Civil</option><option value="LABORAL">Laboral</option>
+        <option value="PENAL">Penal</option><option value="PLENA">Plena</option></select></div>
+      <div><label>Área</label><select id="jur-area" onchange="loadJur(1)">
+        <option value="">Todas</option><option value="salud">Salud</option><option value="pensiones">Pensiones</option>
+        <option value="laboral">Laboral</option><option value="accidentes">Accidentes</option>
+        <option value="insolvencia">Insolvencia</option><option value="derechos_fundamentales">DD.FF.</option></select></div>
+      <div><label>Año</label><input type="number" id="jur-anio" min="2014" max="2030" placeholder="ej. 2024" onchange="loadJur(1)"></div>
+      <div><label>Buscar texto/tema</label><input id="jur-search" placeholder="EPS, fuero, mora..." onkeydown="if(event.key==='Enter')loadJur(1)"></div>
+    </div>
+    <div style="overflow-x:auto"><table id="t-jur"><thead><tr>
+      <th>ID</th><th>Fuente</th><th>Sala</th><th>Año</th><th>Áreas</th>
+      <th>Temas</th><th>Preview</th>
+    </tr></thead><tbody></tbody></table></div>
+    <div id="jur-pager" style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;font-size:13px"></div>
+  </div>
+
+  <!-- TRÁFICO (UTM breakdown) -->
+  <div class="panel" id="p-trafico">
+    <div style="margin-bottom:14px">
+      <h3 style="color:#002347;margin-bottom:4px">📊 Tráfico por canal · últimos 30 días</h3>
+      <div style="font-size:13px;color:#6b7280">Atribución de visitas por <code>utm_source</code> + <code>utm_campaign</code> + landing. Use estos UTM en sus enlaces de Facebook/Google Ads.</div>
+    </div>
+    <div style="background:#f6f8fb;padding:14px;border-radius:8px;margin-bottom:14px;font-size:13px">
+      <b>Ejemplo de URL para campaña Facebook salud:</b><br>
+      <code id="utm-example" style="font-size:12px"></code>
+    </div>
+    <div style="overflow-x:auto"><table id="t-trafico"><thead><tr>
+      <th>Fuente</th><th>Campaña</th><th>Landing</th><th>Visitas</th><th>Únicos</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <!-- Modal: Nueva/editar landing -->
+  <div class="modal-bg" id="m-landing">
+    <div class="modal" style="max-width:780px">
+      <span class="modal-close" onclick="cerrarModales()">×</span>
+      <h3 style="color:#002347;margin-bottom:6px" id="m-landing-title">Nueva landing</h3>
+      <div style="font-size:12px;color:#6b7280;margin-bottom:14px">URL pública: <code>/c/<span id="m-l-slug-preview">slug</span></code></div>
+
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-bottom:10px">
+        <div><label>Slug (URL)</label><input id="ml-slug" placeholder="accidentes" oninput="document.getElementById('m-l-slug-preview').textContent = this.value"></div>
+        <div><label>Título interno</label><input id="ml-title" placeholder="Accidentes de tránsito"></div>
+      </div>
+      <div class="form-group"><label>H1 hero</label><input id="ml-h1" placeholder="¿Te lastimaste y la aseguradora no responde?"></div>
+      <div class="form-group"><label>H1 resaltado en oro (debe estar dentro del H1)</label><input id="ml-h1res" placeholder="aseguradora no responde"></div>
+      <div class="form-group"><label>Subtítulo / lead</label><textarea id="ml-sub" rows="2"></textarea></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+        <div><label>Área foco (auto-selecciona en wizard)</label><select id="ml-area">
+          <option value="">— ninguna específica —</option>
+          <option value="salud">Salud</option><option value="pensiones">Pensiones</option>
+          <option value="laboral">Laboral</option><option value="accidentes">Accidentes</option>
+          <option value="insolvencia">Insolvencia</option><option value="derechos_fundamentales">Derechos fundamentales</option>
+        </select></div>
+        <div><label>Texto del CTA principal</label><input id="ml-cta" placeholder="Conocer mi caso"></div>
+      </div>
+      <div class="form-group"><label>Filtro del carrusel (áreas a mostrar — separadas por coma; vacío = todas)</label>
+        <input id="ml-filtro" placeholder="accidentes,derechos_fundamentales"></div>
+      <div class="form-group"><label>URL de video YouTube/Vimeo (opcional)</label>
+        <input id="ml-video" placeholder="https://www.youtube.com/watch?v=..."></div>
+      <div id="ml-err" style="margin-top:10px;font-size:13px;color:#c8102e"></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+        <button class="btn outline" onclick="cerrarModales()">Cancelar</button>
+        <button class="btn green" onclick="guardarLanding()">💾 Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Editar abogado -->
+  <div class="modal-bg" id="m-edit-lawyer">
+    <div class="modal" style="max-width:560px">
+      <span class="modal-close" onclick="cerrarModales()">×</span>
+      <h3 style="color:#002347;margin-bottom:14px">✏️ Editar abogado</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><label>Nombre</label><input id="edl-name"></div>
+        <div><label>WhatsApp</label><input id="edl-wa"></div>
+        <div><label>Email (login)</label><input id="edl-email" type="email"></div>
+        <div><label>Áreas (* = todas)</label><input id="edl-areas"></div>
+        <div style="grid-column:1/3">
+          <label class="check" style="display:flex;align-items:center;gap:8px;background:#f6f8fb;padding:10px;border-radius:6px">
+            <input type="checkbox" id="edl-default"> Marcar como abogado por defecto
+          </label>
+        </div>
+        <div style="grid-column:1/3">
+          <label class="check" style="display:flex;align-items:center;gap:8px;background:#f6f8fb;padding:10px;border-radius:6px">
+            <input type="checkbox" id="edl-active"> Cuenta activa (puede ingresar al sistema)
+          </label>
+        </div>
+      </div>
+      <div id="edl-err" style="margin-top:10px;font-size:13px;color:#c8102e"></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+        <button class="btn outline" onclick="cerrarModales()">Cancelar</button>
+        <button class="btn green" onclick="guardarEdicionAbogado()">💾 Guardar cambios</button>
+      </div>
+    </div>
+  </div>
+
   <div class="panel" id="p-config">
     <h3 style="margin-bottom:14px;color:#002347">Configuración del sistema</h3>
     <div id="cfg-info"></div>
@@ -3177,6 +3380,215 @@ function tab(name){
   if(name==='citas')loadAppts();
   if(name==='config')loadConfig();
   if(name==='cerebro')loadRagDocs();
+  if(name==='landings')loadLandings();
+  if(name==='jurisprudencia')loadJur(1);
+  if(name==='trafico')loadTrafico();
+}
+
+// ─── Editar abogado ────────────────────────────────────────────────────
+let _editLawyerId = null;
+
+async function editarAbogado(id){
+  const all = await api('/api/admin/lawyers');
+  const l = all.find(x=>x.id===id);
+  if(!l){ alert('No encontrado'); return; }
+  _editLawyerId = id;
+  document.getElementById('edl-name').value = l.name || '';
+  document.getElementById('edl-wa').value = l.whatsapp || '';
+  document.getElementById('edl-email').value = l.email || '';
+  document.getElementById('edl-areas').value = (l.areas||[]).join(',');
+  document.getElementById('edl-default').checked = !!l.is_default;
+  document.getElementById('edl-active').checked = !!l.active;
+  document.getElementById('edl-err').textContent = '';
+  document.getElementById('m-edit-lawyer').classList.add('on');
+}
+
+async function guardarEdicionAbogado(){
+  const errBox = document.getElementById('edl-err');
+  errBox.textContent = '';
+  const body = {
+    name: document.getElementById('edl-name').value.trim(),
+    whatsapp: document.getElementById('edl-wa').value.trim(),
+    email: document.getElementById('edl-email').value.trim().toLowerCase(),
+    areas: document.getElementById('edl-areas').value.split(',').map(s=>s.trim()).filter(Boolean),
+    is_default: document.getElementById('edl-default').checked,
+    active: document.getElementById('edl-active').checked ? 1 : 0,
+  };
+  try{
+    await api('/api/admin/lawyers/'+_editLawyerId,{method:'PATCH',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    cerrarModales();
+    loadLawyers();
+  }catch(e){ errBox.textContent = e.message; }
+}
+
+// ─── Landings ──────────────────────────────────────────────────────────
+let _editLandingId = null;
+
+async function loadLandings(){
+  const data = await api('/api/admin/landings');
+  const tbody = document.querySelector('#t-landings tbody');
+  if(!data.length){
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#888;padding:30px">
+      No hay landings personalizadas todavía. La home <code>/</code> sigue activa por defecto.<br>
+      Crea una nueva para tener URLs específicas como <code>/c/accidentes</code>, <code>/c/laboral</code>, etc.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data.map(l=>{
+    const m = l.metrics_30d || {};
+    const visitas = (m.page_view||{}).total || 0;
+    const leads   = (m.otp_verified||{}).total || 0;
+    const url = '/c/'+l.slug;
+    return `<tr>
+      <td><a href="${url}" target="_blank"><b>${l.slug}</b></a><br><small style="color:#888">${url}</small></td>
+      <td>${l.title}</td>
+      <td>${l.area_focus || '—'}</td>
+      <td>${l.video_url ? '🎥' : '—'}</td>
+      <td>${visitas}</td>
+      <td>${leads}</td>
+      <td>${l.active?'✓':'—'}</td>
+      <td><div class="actions">
+        <a class="btn btn-sm outline" href="${url}" target="_blank">Ver</a>
+        <button class="btn btn-sm" onclick="editarLanding(${l.id})">Editar</button>
+        <button class="btn btn-sm" style="background:#c8102e" onclick="borrarLanding(${l.id})">×</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+function abrirNuevaLanding(){
+  _editLandingId = null;
+  document.getElementById('m-landing-title').textContent = 'Nueva landing';
+  ['ml-slug','ml-title','ml-h1','ml-h1res','ml-sub','ml-cta','ml-filtro','ml-video'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('ml-area').value = '';
+  document.getElementById('ml-cta').value = 'Conocer mi caso';
+  document.getElementById('m-l-slug-preview').textContent = 'slug';
+  document.getElementById('ml-err').textContent = '';
+  document.getElementById('m-landing').classList.add('on');
+}
+
+async function editarLanding(id){
+  const l = await api('/api/admin/landings/'+id);
+  _editLandingId = id;
+  document.getElementById('m-landing-title').textContent = 'Editar landing';
+  document.getElementById('ml-slug').value = l.slug;
+  document.getElementById('m-l-slug-preview').textContent = l.slug;
+  document.getElementById('ml-title').value = l.title;
+  document.getElementById('ml-h1').value = l.h1 || '';
+  document.getElementById('ml-h1res').value = l.h1_resaltado || '';
+  document.getElementById('ml-sub').value = l.subtitulo || '';
+  document.getElementById('ml-area').value = l.area_focus || '';
+  document.getElementById('ml-cta').value = l.cta_texto || 'Conocer mi caso';
+  document.getElementById('ml-filtro').value = (l.casos_filtro||[]).join(',');
+  document.getElementById('ml-video').value = l.video_url || '';
+  document.getElementById('ml-err').textContent = '';
+  document.getElementById('m-landing').classList.add('on');
+}
+
+async function guardarLanding(){
+  const body = {
+    slug: document.getElementById('ml-slug').value.trim().toLowerCase(),
+    title: document.getElementById('ml-title').value.trim(),
+    h1: document.getElementById('ml-h1').value.trim(),
+    h1_resaltado: document.getElementById('ml-h1res').value.trim(),
+    subtitulo: document.getElementById('ml-sub').value.trim(),
+    area_focus: document.getElementById('ml-area').value || null,
+    cta_texto: document.getElementById('ml-cta').value.trim() || 'Conocer mi caso',
+    casos_filtro: document.getElementById('ml-filtro').value.split(',').map(s=>s.trim()).filter(Boolean),
+    casos_extra: [],
+    faq_extra: [],
+    video_url: document.getElementById('ml-video').value.trim(),
+    accionado_label: 'Entidad accionada',
+    accionado_placeholder: '',
+    color_acento: '',
+    utm_default: '',
+  };
+  if(!body.slug || !body.title || !body.h1){
+    document.getElementById('ml-err').textContent = 'Slug, título y H1 son obligatorios.';
+    return;
+  }
+  try{
+    if(_editLandingId){
+      await api('/api/admin/landings/'+_editLandingId,{method:'PATCH',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    } else {
+      await api('/api/admin/landings',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+    cerrarModales();
+    loadLandings();
+  }catch(e){ document.getElementById('ml-err').textContent = e.message; }
+}
+
+async function borrarLanding(id){
+  if(!confirm('¿Eliminar esta landing? La URL dejará de funcionar.'))return;
+  await api('/api/admin/landings/'+id,{method:'DELETE'});
+  loadLandings();
+}
+
+// ─── Jurisprudencia (auditoría) ────────────────────────────────────────
+async function loadJur(page){
+  // stats arriba
+  const s = await api('/api/admin/jurisprudencia/stats');
+  document.getElementById('jur-stats').innerHTML = `
+    <div class="stat-mini"><div class="num">${s.csj_fichas}</div><div class="lbl">Fichas CSJ</div></div>
+    <div class="stat-mini"><div class="num">${s.pdf_aprobados}</div><div class="lbl">PDFs aprobados</div></div>
+    <div class="stat-mini"><div class="num">${s.pdf_chunks}</div><div class="lbl">Chunks de PDFs</div></div>
+    <div class="stat-mini"><div class="num">${s.csj_fichas + s.pdf_chunks}</div><div class="lbl">Total recuperable</div></div>`;
+  // listado
+  const params = new URLSearchParams({page: page, per_page: 50});
+  ['fuente','sala','area'].forEach(k=>{
+    const v = document.getElementById('jur-'+k).value;
+    if(v) params.set(k, v);
+  });
+  const anio = document.getElementById('jur-anio').value;
+  if(anio) params.set('anio', anio);
+  const search = document.getElementById('jur-search').value.trim();
+  if(search) params.set('search', search);
+  const r = await api('/api/admin/jurisprudencia?'+params.toString());
+  const tbody = document.querySelector('#t-jur tbody');
+  if(!r.items.length){
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#888;padding:30px">Sin resultados</td></tr>';
+  } else {
+    tbody.innerHTML = r.items.map(f=>{
+      const tx = (f.texto_busqueda||'').slice(0,180);
+      const temas = (f.temas||[]).slice(0,3).join(' · ');
+      return `<tr>
+        <td><b>${f.id}</b></td>
+        <td>${f._fuente==='csj' ? '📚 CSJ' : '📄 PDF'}</td>
+        <td>${f.sala||'—'}</td>
+        <td>${f.anio||'—'}</td>
+        <td>${(f.areas||[]).join(', ') || '—'}</td>
+        <td style="font-size:11px;max-width:240px">${temas || '—'}</td>
+        <td style="font-size:11px;max-width:300px;color:#555">${tx}…</td>
+      </tr>`;
+    }).join('');
+  }
+  document.getElementById('jur-pager').innerHTML = `
+    <div>Total: <b>${r.total}</b> · página ${r.page}/${r.pages || 1}</div>
+    <div style="display:flex;gap:6px">
+      ${r.page>1 ? `<button class="btn btn-sm outline" onclick="loadJur(${r.page-1})">← Anterior</button>` : ''}
+      ${r.page<r.pages ? `<button class="btn btn-sm outline" onclick="loadJur(${r.page+1})">Siguiente →</button>` : ''}
+    </div>`;
+}
+
+// ─── Tráfico (UTM) ────────────────────────────────────────────────────
+async function loadTrafico(){
+  const r = await api('/api/admin/utm-breakdown?days=30');
+  const tbody = document.querySelector('#t-trafico tbody');
+  if(!r.rows.length){
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#888;padding:30px">Sin tráfico registrado en 30 días.</td></tr>';
+  } else {
+    tbody.innerHTML = r.rows.map(x=>`<tr>
+      <td><b>${x.utm_source}</b></td>
+      <td>${x.utm_campaign}</td>
+      <td>${x.landing}</td>
+      <td>${x.total}</td>
+      <td>${x.uniq}</td>
+    </tr>`).join('');
+  }
+  document.getElementById('utm-example').textContent =
+    `${location.origin}/c/salud?utm_source=facebook&utm_medium=ads&utm_campaign=eps_niega_oct26`;
 }
 
 // ─── Cerebro RAG (admin) ─────────────────────────────────────────────────
@@ -3433,6 +3845,7 @@ async function loadLawyers(){
       <td>${l.active?'✓':'—'}</td>
       <td><button class="btn btn-sm outline" onclick="toggleAvail(${l.id},${l.available?0:1})">${l.available?'On':'Off'}</button></td>
       <td><div class="actions">
+        <button class="btn btn-sm outline" onclick="editarAbogado(${l.id})">✏️ Editar</button>
         <button class="btn btn-sm outline" onclick="abrirHorario(${l.id},'${(l.name||'').replace(/'/g,'')}')">⏰ Horario</button>
         <button class="btn btn-sm outline" onclick="resetPwd(${l.id})">🔑 Reset</button>
         <button class="btn btn-sm" style="background:#c8102e" onclick="delLawyer(${l.id})">×</button>

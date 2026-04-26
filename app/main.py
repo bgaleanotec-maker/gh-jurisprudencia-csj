@@ -616,12 +616,33 @@ async def admin_create_lawyer(body: LawyerCreate):
 
 
 class LawyerPatch(BaseModel):
+    name: Optional[str] = None
+    whatsapp: Optional[str] = None
     email: Optional[str] = None
     password: Optional[str] = None
+    areas: Optional[list[str]] = None
+    is_default: Optional[bool] = None
     available: Optional[bool] = None
+    active: Optional[int] = None
+    role: Optional[str] = None       # 'lawyer' | 'assistant'
 
 @app.patch("/api/admin/lawyers/{lid}", dependencies=[Depends(admin_auth)])
 async def admin_patch_lawyer(lid: int, body: LawyerPatch):
+    full = {}
+    if body.name is not None: full["name"] = body.name.strip()
+    if body.whatsapp is not None:
+        wa_norm = wa.normalizar_telefono(body.whatsapp)
+        if not wa_norm: raise HTTPException(400, "WhatsApp inválido")
+        full["whatsapp"] = wa_norm
+    if body.areas is not None: full["areas"] = body.areas
+    if body.is_default is not None: full["is_default"] = 1 if body.is_default else 0
+    if body.active is not None: full["active"] = body.active
+    if body.role is not None:
+        if body.role not in ("lawyer", "assistant"):
+            raise HTTPException(400, "Role inválido (lawyer | assistant)")
+        full["role"] = body.role
+    if full:
+        db_mod.update_lawyer_full(lid, **full)
     if body.email is not None:
         db_mod.set_lawyer_email(lid, body.email)
     if body.password:
@@ -1169,6 +1190,122 @@ async def cron_reminders(t: str = ""):
             except Exception as e:
                 print(f"[cron] reminder {w} error: {e}")
     return {"ok": True, "sent": sent}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JURISPRUDENCIA · vista admin para auditoría
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/jurisprudencia", dependencies=[Depends(admin_auth)])
+async def admin_jurisprudencia(
+    page: int = 1, per_page: int = 50,
+    sala: Optional[str] = None, area: Optional[str] = None,
+    anio: Optional[int] = None, fuente: Optional[str] = None,
+    search: Optional[str] = None,
+):
+    return db_mod.jurisprudencia_paginada(page=page, per_page=per_page,
+        sala=sala, area=area, anio=anio, fuente=fuente, search=search)
+
+
+@app.get("/api/admin/jurisprudencia/stats", dependencies=[Depends(admin_auth)])
+async def admin_jurisprudencia_stats():
+    return db_mod.jurisprudencia_stats()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LANDINGS multi-vertical
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LandingBody(BaseModel):
+    slug: str = Field(..., min_length=2, max_length=40, pattern=r"^[a-z0-9\-]+$")
+    title: str = Field(..., max_length=120)
+    h1: str = Field(..., max_length=180)
+    h1_resaltado: str = Field("", max_length=80)
+    subtitulo: str = Field("", max_length=400)
+    area_focus: Optional[str] = None
+    accionado_label: str = Field("Entidad accionada", max_length=80)
+    accionado_placeholder: str = Field("", max_length=160)
+    video_url: str = Field("", max_length=400)
+    casos_filtro: list = []          # ej: ["salud","laboral"] para mostrar solo esas
+    casos_extra: list = []           # custom cases [{title, desc, ej, area}]
+    faq_extra: list = []             # [{q, a}]
+    cta_texto: str = Field("Conocer mi caso", max_length=60)
+    color_acento: str = Field("", max_length=12)
+    utm_default: str = Field("", max_length=80)
+
+
+@app.get("/api/admin/landings", dependencies=[Depends(admin_auth)])
+async def admin_list_landings():
+    rows = db_mod.list_landings()
+    # añadir métricas básicas
+    out = []
+    for l in rows:
+        m = db_mod.landing_metrics(l["slug"], days=30)
+        l["metrics_30d"] = m
+        out.append(l)
+    return out
+
+
+@app.post("/api/admin/landings", dependencies=[Depends(admin_auth)])
+async def admin_create_landing(body: LandingBody):
+    try:
+        lid = db_mod.crear_landing(**body.dict())
+        return db_mod.get_landing(lid)
+    except Exception as e:
+        msg = str(e)
+        if "UNIQUE" in msg or "slug" in msg:
+            raise HTTPException(400, f"Slug '{body.slug}' ya existe.")
+        raise HTTPException(500, msg)
+
+
+@app.get("/api/admin/landings/{lid}", dependencies=[Depends(admin_auth)])
+async def admin_get_landing(lid: int):
+    l = db_mod.get_landing(lid)
+    if not l: raise HTTPException(404, "no encontrado")
+    return l
+
+
+@app.patch("/api/admin/landings/{lid}", dependencies=[Depends(admin_auth)])
+async def admin_update_landing(lid: int, body: LandingBody):
+    return db_mod.update_landing(lid, **body.dict())
+
+
+@app.delete("/api/admin/landings/{lid}", dependencies=[Depends(admin_auth)])
+async def admin_delete_landing(lid: int):
+    db_mod.delete_landing(lid); return {"ok": True}
+
+
+@app.get("/api/admin/landings/{lid}/metrics", dependencies=[Depends(admin_auth)])
+async def admin_landing_metrics(lid: int, days: int = 30):
+    l = db_mod.get_landing(lid)
+    if not l: raise HTTPException(404, "no encontrado")
+    return {"slug": l["slug"], "metrics": db_mod.landing_metrics(l["slug"], days=days)}
+
+
+@app.get("/api/admin/utm-breakdown", dependencies=[Depends(admin_auth)])
+async def admin_utm(days: int = 30):
+    return {"days": days, "rows": db_mod.utm_breakdown(days=days)}
+
+
+# Render público de landings personalizadas
+@app.get("/c/{slug}", response_class=HTMLResponse)
+async def public_landing_slug(slug: str, request: Request,
+                                utm_source: Optional[str] = None,
+                                utm_medium: Optional[str] = None,
+                                utm_campaign: Optional[str] = None,
+                                utm_content: Optional[str] = None,
+                                utm_term: Optional[str] = None):
+    cfg = db_mod.get_landing_by_slug(slug)
+    if not cfg:
+        raise HTTPException(404, f"Landing '{slug}' no encontrada")
+    payload = {"landing": slug,
+                "utm_source": utm_source, "utm_medium": utm_medium,
+                "utm_campaign": utm_campaign, "utm_content": utm_content,
+                "utm_term": utm_term}
+    db_mod.track_event("page_view", ip=_ip_of(request),
+                        user_agent=request.headers.get("user-agent",""),
+                        referer=request.headers.get("referer",""), payload=payload)
+    return ui_mod.landing_html(config=cfg)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

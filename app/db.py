@@ -171,6 +171,30 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_rag_chunks_doc ON rag_chunks(doc_id);
         CREATE INDEX IF NOT EXISTS idx_rag_chunks_active ON rag_chunks(active);
 
+        -- Landings multi-vertical (tutelas, accidentes, comparendos, laboral, etc)
+        CREATE TABLE IF NOT EXISTS landings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT UNIQUE NOT NULL,                -- url path (ej: 'accidentes')
+            title TEXT NOT NULL,                      -- nombre interno
+            h1 TEXT NOT NULL,                         -- titular hero
+            h1_resaltado TEXT,                        -- la parte oro del h1
+            subtitulo TEXT,                           -- lead bajo H1
+            area_focus TEXT,                          -- salud|pensiones|laboral|accidentes|insolvencia|derechos_fundamentales
+            accionado_label TEXT,                     -- ej: "Tu aseguradora SOAT"
+            accionado_placeholder TEXT,               -- ej: "Previsora, Sura, AXA..."
+            video_url TEXT,                           -- youtube/vimeo embed url opcional
+            casos_filtro TEXT,                        -- JSON: lista de IDs de casos del carrusel a mostrar
+            casos_extra TEXT,                         -- JSON: casos custom que NO están en el catálogo base
+            faq_extra TEXT,                           -- JSON: [{q, a}] añadido al FAQ base
+            cta_texto TEXT,                           -- ej: "Reclamar mi indemnización"
+            color_acento TEXT,                        -- hex opcional para personalizar (default oro)
+            utm_default TEXT,                         -- utm_source default a sumar
+            active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_landings_slug ON landings(slug);
+
         -- Expedientes formales (con OTP de aceptación del cliente)
         CREATE TABLE IF NOT EXISTS expedientes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -204,15 +228,30 @@ def init_db() -> None:
 
 # ── Lawyers ───────────────────────────────────────────────────────────────────
 
-def create_lawyer(name: str, whatsapp: str, areas: list[str], is_default: bool = False) -> int:
+def create_lawyer(name: str, whatsapp: str, areas: list[str], is_default: bool = False,
+                  role: str = "lawyer") -> int:
     with db() as c:
         if is_default:
             c.execute("UPDATE lawyers SET is_default=0")
         cur = c.execute(
-            "INSERT INTO lawyers(name,whatsapp,areas,is_default) VALUES(?,?,?,?)",
-            (name, whatsapp, json.dumps(areas), 1 if is_default else 0),
+            "INSERT INTO lawyers(name,whatsapp,areas,is_default,role) VALUES(?,?,?,?,?)",
+            (name, whatsapp, json.dumps(areas), 1 if is_default else 0, role),
         )
         return cur.lastrowid
+
+
+def update_lawyer_full(lid: int, **fields) -> None:
+    """Update extendido para edición completa desde admin."""
+    allowed = {"name","whatsapp","email","areas","is_default","active","role"}
+    fields = {k:v for k,v in fields.items() if k in allowed}
+    if not fields: return
+    if "areas" in fields and isinstance(fields["areas"], list):
+        fields["areas"] = json.dumps(fields["areas"])
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with db() as c:
+        if fields.get("is_default"):
+            c.execute("UPDATE lawyers SET is_default=0")
+        c.execute(f"UPDATE lawyers SET {cols} WHERE id=?", (*fields.values(), lid))
 
 
 def list_lawyers(active_only: bool = False) -> list[dict]:
@@ -821,6 +860,242 @@ def rag_stats() -> dict:
     }
 
 
+# ── Landings multi-vertical ───────────────────────────────────────────────────
+
+def crear_landing(slug: str, title: str, h1: str, h1_resaltado: str = "",
+                  subtitulo: str = "", area_focus: Optional[str] = None,
+                  accionado_label: str = "Entidad accionada",
+                  accionado_placeholder: str = "",
+                  video_url: str = "", casos_filtro: Optional[list] = None,
+                  casos_extra: Optional[list] = None,
+                  faq_extra: Optional[list] = None,
+                  cta_texto: str = "Conocer mi caso",
+                  color_acento: str = "",
+                  utm_default: str = "") -> int:
+    with db() as c:
+        cur = c.execute(
+            """INSERT INTO landings(slug,title,h1,h1_resaltado,subtitulo,area_focus,
+                  accionado_label,accionado_placeholder,video_url,casos_filtro,
+                  casos_extra,faq_extra,cta_texto,color_acento,utm_default,active)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+            (slug, title, h1, h1_resaltado, subtitulo, area_focus,
+             accionado_label, accionado_placeholder, video_url,
+             json.dumps(casos_filtro or []),
+             json.dumps(casos_extra or []),
+             json.dumps(faq_extra or []),
+             cta_texto, color_acento, utm_default),
+        )
+        return cur.lastrowid
+
+
+def get_landing_by_slug(slug: str) -> Optional[dict]:
+    with db() as c:
+        r = c.execute("SELECT * FROM landings WHERE slug=? AND active=1", (slug,)).fetchone()
+        if not r: return None
+        d = dict(r)
+        for k in ("casos_filtro", "casos_extra", "faq_extra"):
+            try: d[k] = json.loads(d.get(k) or "[]")
+            except Exception: d[k] = []
+        return d
+
+
+def get_landing(lid: int) -> Optional[dict]:
+    with db() as c:
+        r = c.execute("SELECT * FROM landings WHERE id=?", (lid,)).fetchone()
+        if not r: return None
+        d = dict(r)
+        for k in ("casos_filtro", "casos_extra", "faq_extra"):
+            try: d[k] = json.loads(d.get(k) or "[]")
+            except Exception: d[k] = []
+        return d
+
+
+def list_landings(active_only: bool = False) -> list[dict]:
+    sql = "SELECT * FROM landings"
+    if active_only: sql += " WHERE active=1"
+    sql += " ORDER BY created_at DESC"
+    out = []
+    with db() as c:
+        for r in c.execute(sql):
+            d = dict(r)
+            for k in ("casos_filtro","casos_extra","faq_extra"):
+                try: d[k] = json.loads(d.get(k) or "[]")
+                except Exception: d[k] = []
+            out.append(d)
+    return out
+
+
+def update_landing(lid: int, **fields) -> Optional[dict]:
+    if not fields: return get_landing(lid)
+    allowed = {"slug","title","h1","h1_resaltado","subtitulo","area_focus",
+               "accionado_label","accionado_placeholder","video_url",
+               "casos_filtro","casos_extra","faq_extra",
+               "cta_texto","color_acento","utm_default","active"}
+    fields = {k:v for k,v in fields.items() if k in allowed}
+    for k in ("casos_filtro","casos_extra","faq_extra"):
+        if k in fields and not isinstance(fields[k], str):
+            fields[k] = json.dumps(fields[k])
+    fields["updated_at"] = datetime.now().isoformat()
+    cols = ", ".join(f"{k}=?" for k in fields)
+    with db() as c:
+        c.execute(f"UPDATE landings SET {cols} WHERE id=?", (*fields.values(), lid))
+    return get_landing(lid)
+
+
+def delete_landing(lid: int) -> None:
+    with db() as c:
+        c.execute("DELETE FROM landings WHERE id=?", (lid,))
+
+
+def landing_metrics(slug: str, days: int = 30) -> dict:
+    """Eventos por landing en los últimos N días (page_view, register, etc)."""
+    days = int(days)
+    with db() as c:
+        rows = c.execute(
+            f"""SELECT type, COUNT(*) c, COUNT(DISTINCT ip) uniq
+                FROM events
+                WHERE ts > datetime('now','-{days} days')
+                  AND json_extract(payload,'$.landing')=?
+                GROUP BY type""",
+            (slug,)
+        ).fetchall()
+    return {r["type"]: {"total": r["c"], "uniq": r["uniq"]} for r in rows}
+
+
+def utm_breakdown(days: int = 30) -> list[dict]:
+    """Agrupa eventos page_view por utm_source para análisis de tráfico."""
+    days = int(days)
+    out = []
+    with db() as c:
+        rows = c.execute(
+            f"""SELECT
+                  json_extract(payload,'$.utm_source')   as src,
+                  json_extract(payload,'$.utm_campaign') as cam,
+                  json_extract(payload,'$.landing')      as ld,
+                  COUNT(*) total,
+                  COUNT(DISTINCT ip) uniq
+                FROM events
+                WHERE ts > datetime('now','-{days} days') AND type='page_view'
+                GROUP BY src, cam, ld
+                ORDER BY total DESC LIMIT 100"""
+        ).fetchall()
+        for r in rows:
+            out.append({
+                "utm_source": r["src"] or "(directo)",
+                "utm_campaign": r["cam"] or "(sin campaña)",
+                "landing": r["ld"] or "(home)",
+                "total": r["total"],
+                "uniq": r["uniq"],
+            })
+    return out
+
+
+# ── Vista de jurisprudencia (paginada para auditoría) ─────────────────────────
+
+def jurisprudencia_paginada(page: int = 1, per_page: int = 50,
+                             sala: Optional[str] = None,
+                             area: Optional[str] = None,
+                             anio: Optional[int] = None,
+                             fuente: Optional[str] = None,    # csj | pdf
+                             search: Optional[str] = None) -> dict:
+    """Lista combinada de fichas CSJ (del JSONL) + chunks de PDFs aprobados.
+    Para tab admin de auditoría."""
+    fichas: list[dict] = []
+
+    # 1) Fichas CSJ desde el JSONL
+    if fuente in (None, "csj"):
+        from pathlib import Path as _P
+        idx_path = _P(__file__).parent.parent / "indices" / "fichas_index.jsonl"
+        if idx_path.exists():
+            with open(idx_path, encoding="utf-8") as f:
+                for linea in f:
+                    try:
+                        f_obj = json.loads(linea)
+                        f_obj["_fuente"] = "csj"
+                        fichas.append(f_obj)
+                    except json.JSONDecodeError:
+                        continue
+
+    # 2) Chunks de PDFs (todos los aprobados, no sólo activos)
+    if fuente in (None, "pdf"):
+        with db() as c:
+            rows = c.execute(
+                """SELECT c.*, d.filename, d.metadata, d.status
+                   FROM rag_chunks c JOIN rag_documents d ON d.id=c.doc_id
+                   WHERE c.active=1"""
+            ).fetchall()
+            for r in rows:
+                try: meta = json.loads(r["metadata"] or "{}")
+                except Exception: meta = {}
+                fichas.append({
+                    "id": f"PDF-{r['doc_id']}-c{r['chunk_index']}",
+                    "tipo": meta.get("tipo") or "doc",
+                    "sala": meta.get("sala", "—"),
+                    "anio": meta.get("anio") or meta.get("año"),
+                    "areas": meta.get("areas") or [],
+                    "temas": meta.get("temas") or [],
+                    "tesis": meta.get("tesis"),
+                    "texto_busqueda": r["texto"],
+                    "_fuente": "pdf",
+                    "_doc_filename": r["filename"],
+                    "_doc_status": r["status"],
+                    "_page": r["page"],
+                    "_chunk_index": r["chunk_index"],
+                })
+
+    # 3) Filtros
+    def matches(f):
+        if sala and (f.get("sala") or "").upper() != sala.upper(): return False
+        if area and area not in (f.get("areas") or []): return False
+        if anio:
+            try:
+                if int(f.get("anio") or 0) != anio: return False
+            except Exception: return False
+        if search:
+            s = search.lower()
+            blob = (f.get("texto_busqueda","") + " " + str(f.get("temas",""))).lower()
+            if s not in blob: return False
+        return True
+
+    fichas = [f for f in fichas if matches(f)]
+    total = len(fichas)
+    start = (page - 1) * per_page
+    end = start + per_page
+    return {
+        "items": fichas[start:end],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": (total + per_page - 1) // per_page if total else 0,
+    }
+
+
+def jurisprudencia_stats() -> dict:
+    """Resumen para el header del tab: total CSJ, total PDFs aprobados, por área."""
+    csj = 0
+    from pathlib import Path as _P
+    idx_path = _P(__file__).parent.parent / "indices" / "fichas_index.jsonl"
+    if idx_path.exists():
+        with open(idx_path, encoding="utf-8") as f:
+            csj = sum(1 for _ in f)
+    with db() as c:
+        pdf_chunks = c.execute(
+            "SELECT COUNT(*) c FROM rag_chunks WHERE active=1"
+        ).fetchone()["c"]
+        pdf_docs = c.execute(
+            "SELECT COUNT(DISTINCT doc_id) c FROM rag_chunks WHERE active=1"
+        ).fetchone()["c"]
+        pdf_aprobados = c.execute(
+            "SELECT COUNT(*) c FROM rag_documents WHERE status='approved'"
+        ).fetchone()["c"]
+    return {
+        "csj_fichas": csj,
+        "pdf_chunks": pdf_chunks,
+        "pdf_docs": pdf_docs,
+        "pdf_aprobados": pdf_aprobados,
+    }
+
+
 # ── Expedientes (con OTP de aceptación del cliente y bitácora silenciosa) ────
 
 import secrets as _ssec_exp
@@ -1025,12 +1300,15 @@ def _migrate() -> None:
             c.execute("ALTER TABLE lawyers ADD COLUMN available INTEGER NOT NULL DEFAULT 1")
         if "schedule" not in cols:
             c.execute("ALTER TABLE lawyers ADD COLUMN schedule TEXT")
+        if "role" not in cols:
+            c.execute("ALTER TABLE lawyers ADD COLUMN role TEXT NOT NULL DEFAULT 'lawyer'")
 
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
 def bootstrap_default_lawyer() -> None:
-    """Si no hay abogados y hay env LAWYER_WHATSAPP, crea uno default."""
+    """Si no hay abogados y hay env LAWYER_WHATSAPP, crea uno default.
+    También siembra 4 landings verticales si la tabla está vacía."""
     init_db()
     _migrate()
     with db() as c:
@@ -1043,3 +1321,42 @@ def bootstrap_default_lawyer() -> None:
             print(f"[db] abogado default creado: {name} ({wa})")
         else:
             print("[db] sin LAWYER_WHATSAPP: configura uno en /admin")
+
+    # Seed de 4 landings verticales si no hay ninguna
+    with db() as c:
+        nl = c.execute("SELECT COUNT(*) c FROM landings").fetchone()["c"]
+    if nl == 0:
+        seeds = [
+            {"slug":"tutelas","title":"Tutelas (genérica)",
+             "h1":"Te están negando un derecho. Aquí tienes cómo recuperarlo.",
+             "h1_resaltado":"negando un derecho",
+             "subtitulo":"Genera tu acción de tutela respaldada en sentencias reales de la Corte Suprema.",
+             "area_focus":None, "cta_texto":"Conocer mi caso"},
+            {"slug":"accidentes","title":"Accidentes de tránsito · SOAT",
+             "h1":"¿Tuviste un accidente y la aseguradora no responde?",
+             "h1_resaltado":"la aseguradora no responde",
+             "subtitulo":"SOAT, póliza de responsabilidad civil, indemnización por pérdida de capacidad laboral. Te decimos qué dice la Corte y cuánto te corresponde.",
+             "area_focus":"accidentes",
+             "casos_filtro":["accidentes","derechos_fundamentales"],
+             "cta_texto":"Reclamar mi indemnización"},
+            {"slug":"comparendos","title":"Comparendos y fotomultas",
+             "h1":"Te llegó un comparendo que no es tuyo o no te notificaron.",
+             "h1_resaltado":"que no es tuyo",
+             "subtitulo":"Fotomultas sin notificación, cobros coactivos sin debido proceso. Tutela para suspender el cobro y limpiar tu historial.",
+             "area_focus":"derechos_fundamentales",
+             "casos_filtro":["derechos_fundamentales"],
+             "cta_texto":"Anular mi comparendo"},
+            {"slug":"laboral","title":"Reclamaciones laborales",
+             "h1":"Te despidieron, no te pagan o te acosan en el trabajo.",
+             "h1_resaltado":"te despidieron",
+             "subtitulo":"Fuero materno, despido por enfermedad, contrato realidad, acoso laboral, no pago de salarios. Recupera lo que te corresponde.",
+             "area_focus":"laboral",
+             "casos_filtro":["laboral"],
+             "cta_texto":"Reclamar mis derechos laborales"},
+        ]
+        for s in seeds:
+            try:
+                crear_landing(**s)
+                print(f"[db] landing creada: {s['slug']}")
+            except Exception as e:
+                print(f"[db] error landing {s['slug']}: {e}")
