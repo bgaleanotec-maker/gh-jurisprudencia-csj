@@ -1371,16 +1371,40 @@ def bootstrap_default_lawyer() -> None:
         else:
             print("[db] sin LAWYER_WHATSAPP: configura uno en /admin")
 
-    # Seed de 4 landings verticales si no hay ninguna
+    # Seed / upgrade de 4 landings verticales.
+    # - Si no existe la landing del slug → se crea con la config rica.
+    # - Si existe pero le falta prompt_template (seed antiguo "delgado")
+    #   → se enriquece in-place SIN tocar campos personalizados existentes
+    #   distintos de los que aporta el seed.
+    seeds = _vertical_seeds()
     with db() as c:
-        nl = c.execute("SELECT COUNT(*) c FROM landings").fetchone()["c"]
-    if nl == 0:
-        for s in _vertical_seeds():
+        existentes = {
+            r["slug"]: r["id"]
+            for r in c.execute("SELECT id, slug FROM landings")
+        }
+        delgadas = {
+            r["slug"]: r["id"]
+            for r in c.execute(
+                "SELECT id, slug FROM landings "
+                "WHERE COALESCE(prompt_template,'')='' "
+                "   OR COALESCE(casos_curados,'[]')='[]'"
+            )
+        }
+    for s in seeds:
+        slug = s["slug"]
+        if slug not in existentes:
             try:
                 crear_landing(**s)
-                print(f"[db] landing creada: {s['slug']}")
+                print(f"[db] landing creada: {slug}")
             except Exception as e:
-                print(f"[db] error landing {s['slug']}: {e}")
+                print(f"[db] error creando landing {slug}: {e}")
+        elif slug in delgadas:
+            try:
+                payload = {k: v for k, v in s.items() if k != "slug"}
+                update_landing(delgadas[slug], **payload)
+                print(f"[db] landing enriquecida con seed rico: {slug}")
+            except Exception as e:
+                print(f"[db] error enriqueciendo landing {slug}: {e}")
 
 
 # ---------------------------------------------------------------------------
