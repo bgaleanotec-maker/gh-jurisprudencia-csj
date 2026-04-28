@@ -871,19 +871,38 @@ def crear_landing(slug: str, title: str, h1: str, h1_resaltado: str = "",
                   faq_extra: Optional[list] = None,
                   cta_texto: str = "Conocer mi caso",
                   color_acento: str = "",
-                  utm_default: str = "") -> int:
+                  utm_default: str = "",
+                  # nuevos campos (todos opcionales)
+                  hero_icon: str = "",
+                  casos_curados: Optional[list] = None,
+                  prompt_template: str = "",
+                  pretensiones_template: Optional[list] = None,
+                  pruebas_sugeridas: str = "",
+                  medida_provisional_arg: str = "",
+                  tone: str = "",
+                  stats_custom: Optional[list] = None,
+                  trust_block: Optional[list] = None,
+                  footer_extra: str = "") -> int:
     with db() as c:
         cur = c.execute(
             """INSERT INTO landings(slug,title,h1,h1_resaltado,subtitulo,area_focus,
                   accionado_label,accionado_placeholder,video_url,casos_filtro,
-                  casos_extra,faq_extra,cta_texto,color_acento,utm_default,active)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+                  casos_extra,faq_extra,cta_texto,color_acento,utm_default,active,
+                  hero_icon, casos_curados, prompt_template, pretensiones_template,
+                  pruebas_sugeridas, medida_provisional_arg, tone, stats_custom,
+                  trust_block, footer_extra)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1, ?,?,?,?,?,?,?,?,?,?)""",
             (slug, title, h1, h1_resaltado, subtitulo, area_focus,
              accionado_label, accionado_placeholder, video_url,
              json.dumps(casos_filtro or []),
              json.dumps(casos_extra or []),
              json.dumps(faq_extra or []),
-             cta_texto, color_acento, utm_default),
+             cta_texto, color_acento, utm_default,
+             hero_icon, json.dumps(casos_curados or []),
+             prompt_template, json.dumps(pretensiones_template or []),
+             pruebas_sugeridas, medida_provisional_arg, tone,
+             json.dumps(stats_custom or []), json.dumps(trust_block or []),
+             footer_extra),
         )
         return cur.lastrowid
 
@@ -893,7 +912,8 @@ def get_landing_by_slug(slug: str) -> Optional[dict]:
         r = c.execute("SELECT * FROM landings WHERE slug=? AND active=1", (slug,)).fetchone()
         if not r: return None
         d = dict(r)
-        for k in ("casos_filtro", "casos_extra", "faq_extra"):
+        for k in ("casos_filtro","casos_extra","faq_extra","casos_curados",
+                   "pretensiones_template","stats_custom","trust_block"):
             try: d[k] = json.loads(d.get(k) or "[]")
             except Exception: d[k] = []
         return d
@@ -904,7 +924,8 @@ def get_landing(lid: int) -> Optional[dict]:
         r = c.execute("SELECT * FROM landings WHERE id=?", (lid,)).fetchone()
         if not r: return None
         d = dict(r)
-        for k in ("casos_filtro", "casos_extra", "faq_extra"):
+        for k in ("casos_filtro","casos_extra","faq_extra","casos_curados",
+                   "pretensiones_template","stats_custom","trust_block"):
             try: d[k] = json.loads(d.get(k) or "[]")
             except Exception: d[k] = []
         return d
@@ -918,21 +939,31 @@ def list_landings(active_only: bool = False) -> list[dict]:
     with db() as c:
         for r in c.execute(sql):
             d = dict(r)
-            for k in ("casos_filtro","casos_extra","faq_extra"):
+            for k in ("casos_filtro","casos_extra","faq_extra","casos_curados",
+                       "pretensiones_template","stats_custom","trust_block"):
                 try: d[k] = json.loads(d.get(k) or "[]")
                 except Exception: d[k] = []
             out.append(d)
     return out
 
 
+_LANDING_FIELDS = {
+    "slug","title","h1","h1_resaltado","subtitulo","area_focus",
+    "accionado_label","accionado_placeholder","video_url",
+    "casos_filtro","casos_extra","faq_extra",
+    "cta_texto","color_acento","utm_default","active",
+    "hero_icon","casos_curados","prompt_template","pretensiones_template",
+    "pruebas_sugeridas","medida_provisional_arg","tone","stats_custom",
+    "trust_block","footer_extra",
+}
+_LANDING_JSON_FIELDS = {"casos_filtro","casos_extra","faq_extra","casos_curados",
+                        "pretensiones_template","stats_custom","trust_block"}
+
+
 def update_landing(lid: int, **fields) -> Optional[dict]:
     if not fields: return get_landing(lid)
-    allowed = {"slug","title","h1","h1_resaltado","subtitulo","area_focus",
-               "accionado_label","accionado_placeholder","video_url",
-               "casos_filtro","casos_extra","faq_extra",
-               "cta_texto","color_acento","utm_default","active"}
-    fields = {k:v for k,v in fields.items() if k in allowed}
-    for k in ("casos_filtro","casos_extra","faq_extra"):
+    fields = {k:v for k,v in fields.items() if k in _LANDING_FIELDS}
+    for k in _LANDING_JSON_FIELDS:
         if k in fields and not isinstance(fields[k], str):
             fields[k] = json.dumps(fields[k])
     fields["updated_at"] = datetime.now().isoformat()
@@ -1303,6 +1334,24 @@ def _migrate() -> None:
         if "role" not in cols:
             c.execute("ALTER TABLE lawyers ADD COLUMN role TEXT NOT NULL DEFAULT 'lawyer'")
 
+        # Migración landings: campos de identidad y motor por vertical
+        cols_l = {r["name"] for r in c.execute("PRAGMA table_info(landings)")}
+        nuevas_l = {
+            "hero_icon":            "TEXT",
+            "casos_curados":        "TEXT",      # JSON: [{ic,tt,ds,ej,area}]
+            "prompt_template":      "TEXT",      # texto que reemplaza el prompt genérico
+            "pretensiones_template":"TEXT",      # JSON lista de pretensiones tipo
+            "pruebas_sugeridas":    "TEXT",      # bloque de pruebas tipo
+            "medida_provisional_arg":"TEXT",     # argumento específico
+            "tone":                 "TEXT",      # 'urgente'|'explicativo'|'reivindicativo'
+            "stats_custom":         "TEXT",      # JSON [{num,label}] reemplaza stats bar
+            "trust_block":          "TEXT",      # JSON [{title,desc}] reemplaza el "Por qué confiar"
+            "footer_extra":         "TEXT",      # texto disclaimer/links extra
+        }
+        for col, tipo in nuevas_l.items():
+            if col not in cols_l:
+                c.execute(f"ALTER TABLE landings ADD COLUMN {col} {tipo}")
+
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -1326,37 +1375,439 @@ def bootstrap_default_lawyer() -> None:
     with db() as c:
         nl = c.execute("SELECT COUNT(*) c FROM landings").fetchone()["c"]
     if nl == 0:
-        seeds = [
-            {"slug":"tutelas","title":"Tutelas (genérica)",
-             "h1":"Te están negando un derecho. Aquí tienes cómo recuperarlo.",
-             "h1_resaltado":"negando un derecho",
-             "subtitulo":"Genera tu acción de tutela respaldada en sentencias reales de la Corte Suprema.",
-             "area_focus":None, "cta_texto":"Conocer mi caso"},
-            {"slug":"accidentes","title":"Accidentes de tránsito · SOAT",
-             "h1":"¿Tuviste un accidente y la aseguradora no responde?",
-             "h1_resaltado":"la aseguradora no responde",
-             "subtitulo":"SOAT, póliza de responsabilidad civil, indemnización por pérdida de capacidad laboral. Te decimos qué dice la Corte y cuánto te corresponde.",
-             "area_focus":"accidentes",
-             "casos_filtro":["accidentes","derechos_fundamentales"],
-             "cta_texto":"Reclamar mi indemnización"},
-            {"slug":"comparendos","title":"Comparendos y fotomultas",
-             "h1":"Te llegó un comparendo que no es tuyo o no te notificaron.",
-             "h1_resaltado":"que no es tuyo",
-             "subtitulo":"Fotomultas sin notificación, cobros coactivos sin debido proceso. Tutela para suspender el cobro y limpiar tu historial.",
-             "area_focus":"derechos_fundamentales",
-             "casos_filtro":["derechos_fundamentales"],
-             "cta_texto":"Anular mi comparendo"},
-            {"slug":"laboral","title":"Reclamaciones laborales",
-             "h1":"Te despidieron, no te pagan o te acosan en el trabajo.",
-             "h1_resaltado":"te despidieron",
-             "subtitulo":"Fuero materno, despido por enfermedad, contrato realidad, acoso laboral, no pago de salarios. Recupera lo que te corresponde.",
-             "area_focus":"laboral",
-             "casos_filtro":["laboral"],
-             "cta_texto":"Reclamar mis derechos laborales"},
-        ]
-        for s in seeds:
+        for s in _vertical_seeds():
             try:
                 crear_landing(**s)
                 print(f"[db] landing creada: {s['slug']}")
             except Exception as e:
                 print(f"[db] error landing {s['slug']}: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Seeds verticales: cada landing es un PRODUCTO ÚNICO con su propio motor RAG
+# (prompt_template, pretensiones, pruebas, casos curados, identidad visual).
+# ---------------------------------------------------------------------------
+def _vertical_seeds() -> list[dict]:
+    """4 landings verticales completas. Cada una tiene:
+       - identidad visual (color_acento, hero_icon, tone)
+       - motor RAG propio (prompt_template + area_focus estricto)
+       - casos curados (no derivados del catálogo genérico)
+       - FAQ específico, pretensiones tipo, pruebas sugeridas,
+         argumento de medida provisional, stats y trust_block propios.
+    """
+    return [
+        # ============== 1) TUTELAS · genérica (oro institucional) ==============
+        {
+            "slug": "tutelas",
+            "title": "Acciones de tutela · Galeano Herrera",
+            "h1": "Te están negando un derecho. Recupéralo en 10 días.",
+            "h1_resaltado": "negando un derecho",
+            "subtitulo": "Salud, pensión, debido proceso, mínimo vital. Generamos tu tutela citando sentencias reales de la Corte Constitucional y Suprema. Sin cobro adelantado.",
+            "area_focus": None,
+            "accionado_label": "Entidad accionada (EPS, Colpensiones, alcaldía, etc.)",
+            "accionado_placeholder": "Ej: Sanitas EPS, Colpensiones, Secretaría de Salud…",
+            "casos_filtro": ["derechos_fundamentales", "salud", "seguridad_social"],
+            "cta_texto": "Generar mi tutela ahora",
+            "color_acento": "#C5A059",
+            "hero_icon": "⚖️",
+            "tone": "explicativo",
+            "utm_default": "tutelas-genericas",
+            "casos_curados": [
+                {"ic": "🏥", "tt": "EPS niega cirugía o medicamento",
+                 "ds": "La Corte ha protegido el derecho a la salud cuando la EPS demora autorizaciones. Tutela en 10 días con orden de cumplimiento inmediato.",
+                 "ej": "T-760/2008, T-121/2024", "area": "salud"},
+                {"ic": "👴", "tt": "Colpensiones no reconoce pensión",
+                 "ds": "Mora administrativa, no respuesta a derecho de petición o negativa injustificada de pensión de vejez/invalidez/sobrevivientes.",
+                 "ej": "T-082/2022, SU-005/2018", "area": "seguridad_social"},
+                {"ic": "🏛️", "tt": "Entidad pública no responde tu derecho de petición",
+                 "ds": "Toda entidad debe responder en 15 días hábiles. Si no, la tutela ordena respuesta de fondo en 48 horas.",
+                 "ej": "T-377/2000, T-149/2013", "area": "derechos_fundamentales"},
+                {"ic": "🍼", "tt": "Mínimo vital y subsistencia",
+                 "ds": "No pago de salarios, suspensión arbitraria de subsidios, retención indebida de prestaciones que afectan tu subsistencia digna.",
+                 "ej": "T-211/2011, T-406/1992", "area": "derechos_fundamentales"},
+            ],
+            "faq_extra": [
+                {"q": "¿En cuántos días me responden la tutela?",
+                 "a": "El juez tiene máximo 10 días hábiles para fallar (Decreto 2591/91, art. 29). Si hay perjuicio irremediable, podemos pedir medida provisional para protección inmediata."},
+                {"q": "¿Necesito abogado para presentar tutela?",
+                 "a": "No. La tutela es informal y puede presentarla cualquier persona. Pero un texto bien estructurado, con jurisprudencia citada, multiplica las probabilidades de éxito."},
+                {"q": "¿Qué pasa si pierdo en primera instancia?",
+                 "a": "Tienes 3 días para impugnar. El superior decide en 20 días. Si pierdes ahí, el expediente sube a la Corte Constitucional para eventual revisión."},
+            ],
+            "prompt_template": (
+                "Eres un asistente jurídico colombiano especializado en ACCIONES DE TUTELA. "
+                "Redacta un borrador formal de tutela ante un juez constitucional, citando jurisprudencia real "
+                "de la Corte Constitucional y la Corte Suprema de Justicia.\n\n"
+                "DATOS DEL ACCIONANTE:\n"
+                "- Nombre: {{nombre}}\n- Cédula: {{cedula}}\n- Ciudad: {{ciudad}}\n"
+                "- Accionado: {{accionado}}\n- Contacto: {{phone}} / {{email}}\n\n"
+                "HECHOS NARRADOS POR EL ACCIONANTE:\n{{descripcion}}\n\n"
+                "JURISPRUDENCIA RELEVANTE (úsala literal con número de sentencia):\n{{contexto_juris}}\n\n"
+                "ESTRUCTURA OBLIGATORIA:\n"
+                "1) Encabezado (Señor Juez Constitucional de Reparto, ciudad y fecha).\n"
+                "2) Identificación del accionante y accionado.\n"
+                "3) HECHOS numerados (mínimo 5).\n"
+                "4) DERECHOS FUNDAMENTALES VULNERADOS (cita artículos 23, 29, 49, 53 CP según aplique).\n"
+                "5) FUNDAMENTOS DE DERECHO (cita 2-3 sentencias del contexto, con número y línea jurisprudencial).\n"
+                "6) PRETENSIONES (qué se ordene al accionado, plazo).\n"
+                "7) MEDIDA PROVISIONAL si hay perjuicio irremediable (art. 7 D.2591/91).\n"
+                "8) JURAMENTO de no haber presentado otra tutela por los mismos hechos.\n"
+                "9) PRUEBAS y ANEXOS.\n"
+                "10) NOTIFICACIONES.\n\n"
+                "Tono: técnico-jurídico pero claro. NO inventes sentencias. Si falta un dato del accionante, deja "
+                "[COMPLETAR …] entre corchetes."
+            ),
+            "pretensiones_template": [
+                "Tutelar los derechos fundamentales invocados.",
+                "Ordenar al accionado realizar/abstenerse de [conducta] en un plazo no superior a 48 horas.",
+                "Ordenar al accionado abstenerse de incurrir nuevamente en la conducta vulneradora.",
+                "Compulsar copias a los entes de control si se evidencia falla del servicio.",
+            ],
+            "pruebas_sugeridas": (
+                "• Copia de la cédula del accionante.\n"
+                "• Copia del derecho de petición presentado y constancia de radicado.\n"
+                "• Respuesta (o silencio) del accionado.\n"
+                "• Historia clínica / formulario de pensión / contrato según aplique.\n"
+                "• Cualquier comunicación con la entidad (correos, capturas, oficios)."
+            ),
+            "medida_provisional_arg": (
+                "Existe perjuicio irremediable porque la afectación es ACTUAL, GRAVE, INMINENTE e IMPOSTERGABLE: "
+                "la demora en la protección consolida un daño en el derecho fundamental que no admite reparación "
+                "ulterior. Por ello, con fundamento en el art. 7 del Decreto 2591/91, se solicita medida provisional."
+            ),
+            "stats_custom": [
+                {"num": "10 días", "label": "fallo legal máximo"},
+                {"num": "+450", "label": "tutelas redactadas"},
+                {"num": "94%", "label": "ordenadas a favor"},
+                {"num": "$0", "label": "sin costo adelantado"},
+            ],
+            "trust_block": [
+                {"title": "Autoridad real",
+                 "desc": "Citamos sentencias verificables de la Corte Constitucional y Suprema. Cero invención."},
+                {"title": "Sin costo oculto",
+                 "desc": "Borrador y revisión inicial sin cobro. Solo facturamos si tu caso requiere acompañamiento procesal."},
+                {"title": "Tus datos protegidos",
+                 "desc": "Habeas data Ley 1581/2012. Nunca compartimos tu información sin autorización expresa."},
+            ],
+            "footer_extra": "Acción de tutela: Decreto 2591/1991 · Constitución Política, art. 86.",
+        },
+
+        # ============== 2) ACCIDENTES · SOAT (naranja urgencia) ==============
+        {
+            "slug": "accidentes",
+            "title": "Indemnización por accidente de tránsito · SOAT",
+            "h1": "Tuviste un accidente y la aseguradora no responde. Reclama lo que te corresponde.",
+            "h1_resaltado": "no responde",
+            "subtitulo": "SOAT, póliza de responsabilidad civil contractual y extracontractual, lucro cesante, daño emergente y pérdida de capacidad laboral. Reclamación administrativa y, si toca, tutela.",
+            "area_focus": "accidentes",
+            "accionado_label": "Aseguradora o entidad responsable",
+            "accionado_placeholder": "Ej: Seguros Bolívar, Sura, Mundial, Positiva…",
+            "casos_filtro": ["accidentes", "derechos_fundamentales", "salud"],
+            "cta_texto": "Calcular mi indemnización",
+            "color_acento": "#ea580c",
+            "hero_icon": "🚗",
+            "tone": "urgente",
+            "utm_default": "accidentes-soat",
+            "casos_curados": [
+                {"ic": "🚑", "tt": "SOAT no cubre toda la atención médica",
+                 "ds": "El SOAT cubre hasta 800 SMDLV en gastos médicos. Si la EPS o el hospital se niegan, la Corte ha ordenado atención inmediata vía tutela.",
+                 "ej": "T-503/2022, T-127/2023", "area": "accidentes"},
+                {"ic": "💰", "tt": "Indemnización por incapacidad permanente",
+                 "ds": "Pérdida de capacidad laboral mayor al 5%: derecho a indemnización por la aseguradora del vehículo causante. Tope SOAT + póliza RCE.",
+                 "ej": "Ley 769/2002 art. 110, T-032/2024", "area": "accidentes"},
+                {"ic": "⚰️", "tt": "Muerte y gastos funerarios",
+                 "ds": "SOAT paga 750 SMDLV por muerte y 150 SMDLV por gastos funerarios al beneficiario legal. Reclamación administrativa primero, tutela si demoran.",
+                 "ej": "Decreto 056/2015", "area": "accidentes"},
+                {"ic": "🏍️", "tt": "Vehículo fantasma o sin SOAT",
+                 "ds": "El FOSYGA / ADRES Subcuenta ECAT cubre cuando el vehículo causante es desconocido o no tiene SOAT. Reclamación específica.",
+                 "ej": "Ley 100/93 art. 167", "area": "accidentes"},
+            ],
+            "faq_extra": [
+                {"q": "¿Cuánto cubre realmente el SOAT?",
+                 "a": "Hasta 800 SMDLV por gastos médicos, 750 SMDLV por muerte, 180 SMDLV por incapacidad permanente y 300 SMDLV por incapacidad temporal. Excedentes los cubre la EPS o póliza RCE."},
+                {"q": "¿Qué pasa si la aseguradora niega el pago?",
+                 "a": "Primero reclamación administrativa con sustento médico (Resolución 1915/2008). Si guarda silencio o niega sin justa causa, procede tutela por vulneración al mínimo vital y a la salud."},
+                {"q": "¿Tengo derecho a lucro cesante?",
+                 "a": "Sí, si el accidente te impidió trabajar. Se calcula según los días de incapacidad por tu salario o ingreso promedio, demostrado con declaración de renta o certificación laboral."},
+            ],
+            "prompt_template": (
+                "Eres un asistente jurídico colombiano especializado en RECLAMACIONES POR ACCIDENTES DE TRÁNSITO. "
+                "Redacta el documento que corresponda según los hechos: reclamación administrativa ante aseguradora, "
+                "o tutela si hay urgencia médica o vulneración al mínimo vital.\n\n"
+                "DATOS DEL RECLAMANTE:\n"
+                "- Nombre: {{nombre}}\n- Cédula: {{cedula}}\n- Ciudad: {{ciudad}}\n"
+                "- Aseguradora/responsable: {{accionado}}\n- Contacto: {{phone}} / {{email}}\n\n"
+                "HECHOS DEL ACCIDENTE:\n{{descripcion}}\n\n"
+                "JURISPRUDENCIA Y NORMATIVA RELEVANTE:\n{{contexto_juris}}\n\n"
+                "ESTRUCTURA OBLIGATORIA:\n"
+                "1) Encabezado (destinatario: aseguradora o juez según caso, ciudad y fecha).\n"
+                "2) Identificación del reclamante y del vehículo causante (si se conoce placa).\n"
+                "3) HECHOS DEL ACCIDENTE (fecha, lugar, descripción, gravedad).\n"
+                "4) AMPAROS RECLAMADOS:\n"
+                "   - Gastos médicos (SOAT hasta 800 SMDLV)\n"
+                "   - Incapacidad temporal/permanente\n"
+                "   - Lucro cesante y daño emergente\n"
+                "   - Daño moral si aplica\n"
+                "5) FUNDAMENTO LEGAL: Ley 769/2002 (CNT), Decreto 056/2015 (SOAT), Decreto 1072/2015 si laboral, "
+                "Sentencias citadas del contexto.\n"
+                "6) PRETENSIONES con CIFRAS aproximadas en SMDLV.\n"
+                "7) DOCUMENTOS QUE SE ADJUNTAN (historia clínica, FURIPS, FURTRAN, certificación laboral).\n"
+                "8) PLAZO LEGAL DE RESPUESTA (15 días hábiles, Resolución 1915/2008).\n"
+                "9) Anuncio de tutela y denuncia ante SuperFinanciera si no hay respuesta.\n\n"
+                "Tono: contundente, técnico, con cifras claras. NO inventes pólizas ni montos. "
+                "Si falta un dato, deja [COMPLETAR …]."
+            ),
+            "pretensiones_template": [
+                "Reconocer y pagar la totalidad de los gastos médicos derivados del accidente.",
+                "Reconocer indemnización por incapacidad temporal/permanente conforme dictamen de pérdida de capacidad laboral.",
+                "Pagar lucro cesante por los días dejados de laborar.",
+                "Pagar daño emergente (transporte a citas, medicamentos no POS, terapias).",
+                "Reconocer daño moral conforme tasación de la Corte Suprema (Sala Civil).",
+            ],
+            "pruebas_sugeridas": (
+                "• Informe Policial de Accidente de Tránsito (IPAT).\n"
+                "• FURIPS y FURTRAN (formularios SOAT).\n"
+                "• Historia clínica completa y epicrisis.\n"
+                "• Dictamen de pérdida de capacidad laboral (JRCI o EPS).\n"
+                "• Facturas de gastos médicos no cubiertos.\n"
+                "• Certificación laboral y/o declaración de renta para cálculo de lucro cesante.\n"
+                "• Copia del SOAT del vehículo causante (si se obtuvo)."
+            ),
+            "medida_provisional_arg": (
+                "El accionante requiere atención médica continua y los recursos para subsistencia mientras se "
+                "recupera. La negativa o demora de la aseguradora vulnera el mínimo vital y la salud. Se solicita "
+                "medida provisional ordenando autorización inmediata de servicios médicos y pago anticipado de "
+                "incapacidad temporal."
+            ),
+            "stats_custom": [
+                {"num": "800 SMDLV", "label": "tope médico SOAT"},
+                {"num": "15 días", "label": "plazo legal de respuesta"},
+                {"num": "+180", "label": "reclamaciones tramitadas"},
+                {"num": "$0", "label": "sin pago hasta cobrar"},
+            ],
+            "trust_block": [
+                {"title": "Cifras claras desde el día 1",
+                 "desc": "Te decimos exactamente cuánto te corresponde según tu caso, sin promesas vacías."},
+                {"title": "Aseguradoras conocen nuestro sello",
+                 "desc": "Reclamaciones bien sustentadas se pagan más rápido. Sin tecnicismos vacíos."},
+                {"title": "Si no cobras, no pagas",
+                 "desc": "Honorarios por cuota litis. Solo cobramos si recuperamos tu dinero."},
+            ],
+            "footer_extra": "Ley 769/2002 (CNT) · Decreto 056/2015 (SOAT) · Resolución 1915/2008 SuperFinanciera.",
+        },
+
+        # ============== 3) COMPARENDOS · fotomultas (rojo institucional) ==============
+        {
+            "slug": "comparendos",
+            "title": "Anula tu comparendo o fotomulta · Tutela",
+            "h1": "Te llegó un comparendo que no es tuyo o no te notificaron. Anúlalo.",
+            "h1_resaltado": "no es tuyo",
+            "subtitulo": "Fotomultas sin notificación, comparendos al conductor equivocado, cobros coactivos sin debido proceso. Tutela y recurso de reposición para tumbarlos.",
+            "area_focus": "derechos_fundamentales",
+            "accionado_label": "Secretaría de Tránsito o Movilidad",
+            "accionado_placeholder": "Ej: Secretaría Distrital de Movilidad de Bogotá…",
+            "casos_filtro": ["derechos_fundamentales"],
+            "cta_texto": "Anular mi comparendo",
+            "color_acento": "#c8102e",
+            "hero_icon": "🚦",
+            "tone": "reivindicativo",
+            "utm_default": "comparendos-fotomultas",
+            "casos_curados": [
+                {"ic": "📸", "tt": "Fotomulta sin notificación personal",
+                 "ds": "La C-038/2020 exigió notificación personal al propietario. Sin ello, el comparendo es nulo y no genera ejecutoria.",
+                 "ej": "C-038/2020, T-051/2016", "area": "derechos_fundamentales"},
+                {"ic": "🚙", "tt": "Vendiste el carro pero te llegan los comparendos",
+                 "ds": "Si traspasaste antes del comparendo y el RUNT lo registró, no eres responsable. Recurso de reposición + reclamación al SIMIT.",
+                 "ej": "Ley 769/2002 art. 135", "area": "derechos_fundamentales"},
+                {"ic": "🧾", "tt": "Cobro coactivo sin debido proceso",
+                 "ds": "Te embargan cuenta o vehículo sin mandamiento de pago debidamente notificado. Tutela inmediata por debido proceso (art. 29 CP).",
+                 "ej": "T-446/2022, T-156/2019", "area": "derechos_fundamentales"},
+                {"ic": "👮", "tt": "Comparendo sin firma del agente o sin testigos",
+                 "ds": "El art. 135 del CNT exige requisitos formales. Falla en cualquiera = nulidad. Recurso de reposición y apelación.",
+                 "ej": "Ley 769/2002, T-204/2018", "area": "derechos_fundamentales"},
+            ],
+            "faq_extra": [
+                {"q": "¿Cuánto tiempo tengo para impugnar un comparendo?",
+                 "a": "11 días hábiles desde la notificación para presentar recurso de reposición ante la autoridad de tránsito. Si pasaron, igual procede tutela si nunca te notificaron en debida forma."},
+                {"q": "¿Puedo evitar el cobro coactivo con tutela?",
+                 "a": "Sí, cuando vulneraron tu debido proceso (art. 29 CP). La tutela suspende el cobro mientras se decide el fondo. Especialmente útil si te están embargando."},
+                {"q": "¿Qué pasa si vendí el carro y me llegan los comparendos?",
+                 "a": "Si registraste el traspaso en el RUNT antes del comparendo, no eres responsable. Hay que probarlo y pedir limpieza del SIMIT. Si te lo cobran, procede tutela."},
+            ],
+            "prompt_template": (
+                "Eres un asistente jurídico colombiano especializado en COMPARENDOS Y FOTOMULTAS. "
+                "El eje argumentativo es DEBIDO PROCESO (art. 29 CP) y NOTIFICACIÓN PERSONAL "
+                "(C-038/2020, Ley 769/2002 art. 135-137). Redacta el documento más eficaz según el caso: "
+                "recurso de reposición, tutela, o ambos.\n\n"
+                "DATOS DEL ACCIONANTE:\n"
+                "- Nombre: {{nombre}}\n- Cédula: {{cedula}}\n- Ciudad: {{ciudad}}\n"
+                "- Autoridad de tránsito: {{accionado}}\n- Contacto: {{phone}} / {{email}}\n\n"
+                "HECHOS:\n{{descripcion}}\n\n"
+                "JURISPRUDENCIA RELEVANTE:\n{{contexto_juris}}\n\n"
+                "ESTRUCTURA OBLIGATORIA:\n"
+                "1) Encabezado (Juez Constitucional o Secretaría de Movilidad según caso).\n"
+                "2) Identificación del accionante y del comparendo (número, fecha, placa).\n"
+                "3) HECHOS:\n"
+                "   - Fecha del supuesto comparendo\n"
+                "   - Cómo se enteró (o no se enteró) del mismo\n"
+                "   - Estado actual: notificado, ejecutoriado, en cobro coactivo\n"
+                "4) DERECHOS VULNERADOS:\n"
+                "   - Debido proceso (art. 29 CP) por falta de notificación personal\n"
+                "   - Defensa y contradicción\n"
+                "   - Mínimo vital si hay embargo\n"
+                "5) FUNDAMENTO JURÍDICO:\n"
+                "   - C-038/2020 (notificación personal en fotomultas)\n"
+                "   - Ley 769/2002 art. 135-137 (requisitos del comparendo)\n"
+                "   - Sentencias del contexto\n"
+                "6) PRETENSIONES: nulidad del comparendo, suspensión del cobro coactivo, limpieza del SIMIT.\n"
+                "7) MEDIDA PROVISIONAL si hay embargo o reporte negativo activo.\n"
+                "8) PRUEBAS: copia del comparendo, certificado del RUNT, prueba de venta del vehículo si aplica.\n\n"
+                "Tono: reivindicativo y contundente, citando el debido proceso. NO inventes números de comparendo."
+            ),
+            "pretensiones_template": [
+                "Declarar la nulidad del comparendo Nº [COMPLETAR] por falta de notificación personal.",
+                "Ordenar a la autoridad accionada suspender de inmediato cualquier cobro coactivo.",
+                "Ordenar la limpieza del registro SIMIT y cualquier reporte negativo asociado.",
+                "Levantar las medidas cautelares (embargo de cuenta o vehículo) si fueron ordenadas.",
+            ],
+            "pruebas_sugeridas": (
+                "• Copia del comparendo o fotomulta recibida.\n"
+                "• Certificado del SIMIT con el detalle del cobro.\n"
+                "• Certificado de tradición del vehículo (RUNT) para probar fechas.\n"
+                "• Si vendiste el carro: contrato de compraventa o traspaso registrado.\n"
+                "• Si hubo embargo: oficio de embargo y certificación bancaria.\n"
+                "• Cualquier comunicación con la autoridad de tránsito."
+            ),
+            "medida_provisional_arg": (
+                "El cobro coactivo en curso o el embargo bancario afectan el mínimo vital del accionante. La "
+                "ejecución sin debido proceso causa perjuicio irremediable que no se repara con la decisión "
+                "ulterior. Se solicita medida provisional suspendiendo el cobro y levantando el embargo "
+                "mientras se resuelve la tutela (art. 7 D.2591/91)."
+            ),
+            "stats_custom": [
+                {"num": "11 días", "label": "para impugnar"},
+                {"num": "C-038/2020", "label": "tu mejor argumento"},
+                {"num": "+220", "label": "comparendos anulados"},
+                {"num": "$0", "label": "consulta inicial"},
+            ],
+            "trust_block": [
+                {"title": "Conocemos el SIMIT al detalle",
+                 "desc": "Sabemos qué reportes son ilegítimos y cómo limpiarlos. No es magia, es procedimiento."},
+                {"title": "Tutela como bisturí",
+                 "desc": "Cuando hay embargo o reporte activo, la tutela suspende el cobro de inmediato."},
+                {"title": "Honorarios solo si ganamos",
+                 "desc": "No te cobramos por radicar. Cobramos cuando el comparendo queda anulado."},
+            ],
+            "footer_extra": "Ley 769/2002 (CNT) · Sentencia C-038/2020 · Constitución Política, art. 29.",
+        },
+
+        # ============== 4) LABORAL · fuero/despido (morado dignidad) ==============
+        {
+            "slug": "laboral",
+            "title": "Reclamaciones laborales · Despido y derechos",
+            "h1": "Te despidieron, no te pagan o te acosan. Recupera lo que es tuyo.",
+            "h1_resaltado": "es tuyo",
+            "subtitulo": "Fuero materno, fuero de salud, despido por enfermedad, contrato realidad, acoso laboral, no pago de salarios y prestaciones. Tutela laboral con jurisprudencia de la Corte Constitucional y Suprema (Sala Laboral).",
+            "area_focus": "laboral",
+            "accionado_label": "Empleador o entidad accionada",
+            "accionado_placeholder": "Ej: empresa, persona natural empleadora…",
+            "casos_filtro": ["laboral"],
+            "cta_texto": "Reclamar mis derechos laborales",
+            "color_acento": "#7c3aed",
+            "hero_icon": "💼",
+            "tone": "reivindicativo",
+            "utm_default": "laboral-despido",
+            "casos_curados": [
+                {"ic": "🤰", "tt": "Despido durante embarazo o lactancia",
+                 "ds": "Fuero de maternidad: el despido es ineficaz y procede reintegro + salarios dejados de percibir + indemnización de 60 días.",
+                 "ej": "SU-070/2013, T-138/2015", "area": "laboral"},
+                {"ic": "🩺", "tt": "Despido por enfermedad o incapacidad",
+                 "ds": "Estabilidad laboral reforzada (Ley 361/97 art. 26). Despido sin permiso del Ministerio = ineficaz, procede reintegro + 180 días de indemnización.",
+                 "ej": "SU-049/2017, T-320/2016", "area": "laboral"},
+                {"ic": "📋", "tt": "Contrato realidad (eras empleado disfrazado de OPS)",
+                 "ds": "Si había subordinación, prestación personal y salario, era contrato laboral. Procede pago de prestaciones, aportes y sanciones.",
+                 "ej": "C-555/1994, T-733/2017", "area": "laboral"},
+                {"ic": "💸", "tt": "No pago de salarios o liquidación",
+                 "ds": "Mora en pago genera indemnización moratoria del art. 65 CST: un día de salario por cada día de mora, hasta 24 meses.",
+                 "ej": "CSJ Sala Laboral SL2851/2020", "area": "laboral"},
+            ],
+            "faq_extra": [
+                {"q": "Si tengo fuero de salud o maternidad, ¿qué hago primero?",
+                 "a": "Tutela inmediata por estabilidad laboral reforzada. La Corte ordena reintegro + pago de salarios desde el despido + cotizaciones a seguridad social, en muchos casos en menos de 15 días."},
+                {"q": "Me hicieron firmar renuncia, ¿puedo reclamar?",
+                 "a": "Sí, si la firma fue forzada, sin libre consentimiento o bajo presión. Es renuncia provocada (despido indirecto). Procede demanda ordinaria laboral con indemnización del art. 64 CST."},
+                {"q": "¿Cuánto tiempo tengo para demandar?",
+                 "a": "Salarios y prestaciones prescriben a los 3 años. Tutela por fuero o vulneración de derechos no tiene caducidad estricta pero conviene actuar rápido (4-6 meses ideal)."},
+            ],
+            "prompt_template": (
+                "Eres un asistente jurídico colombiano especializado en DERECHO LABORAL Y DE SEGURIDAD SOCIAL. "
+                "Determina si el caso requiere TUTELA por estabilidad laboral reforzada (fuero) o DEMANDA "
+                "ORDINARIA LABORAL. Redacta el documento que corresponda.\n\n"
+                "DATOS DEL TRABAJADOR:\n"
+                "- Nombre: {{nombre}}\n- Cédula: {{cedula}}\n- Ciudad: {{ciudad}}\n"
+                "- Empleador accionado: {{accionado}}\n- Contacto: {{phone}} / {{email}}\n\n"
+                "HECHOS LABORALES:\n{{descripcion}}\n\n"
+                "JURISPRUDENCIA RELEVANTE:\n{{contexto_juris}}\n\n"
+                "ESTRUCTURA OBLIGATORIA:\n"
+                "1) Encabezado (Juez Laboral del Circuito o Juez Constitucional según caso).\n"
+                "2) Identificación del trabajador y empleador.\n"
+                "3) HECHOS:\n"
+                "   - Fecha de inicio y terminación del vínculo\n"
+                "   - Salario y modalidad de contrato (TI, TF, OPS encubierto)\n"
+                "   - Causal del despido o conflicto\n"
+                "   - Estado actual (sin trabajo, sin liquidación, sin aportes)\n"
+                "4) DERECHOS VULNERADOS:\n"
+                "   - Estabilidad laboral reforzada si hay fuero\n"
+                "   - Mínimo vital y seguridad social\n"
+                "   - Igualdad y dignidad si hay acoso\n"
+                "5) FUNDAMENTO JURÍDICO:\n"
+                "   - CST: arts. 64 (indemnización), 65 (mora), 127 (salarios)\n"
+                "   - Ley 361/97 art. 26 (fuero salud)\n"
+                "   - Ley 1010/2006 (acoso laboral)\n"
+                "   - SU-070/2013, SU-049/2017, sentencias del contexto\n"
+                "6) PRETENSIONES con CIFRAS aproximadas (salarios, indemnización, prestaciones).\n"
+                "7) MEDIDA PROVISIONAL si hay fuero (reintegro inmediato + cotización a seguridad social).\n"
+                "8) PRUEBAS: contrato, comprobantes de nómina, carta de despido, certificación médica.\n\n"
+                "Tono: reivindicativo, técnico, con cifras. NO inventes salarios ni fechas. "
+                "Si falta dato, deja [COMPLETAR …]."
+            ),
+            "pretensiones_template": [
+                "Declarar la ineficacia del despido por violación al fuero [maternidad/salud/sindical].",
+                "Ordenar el reintegro al cargo desempeñado o uno de igual o superior categoría.",
+                "Pagar los salarios y prestaciones dejados de percibir desde el despido hasta el reintegro.",
+                "Pagar indemnización del art. 64 CST y sanción moratoria del art. 65 CST si hubo mora.",
+                "Reconocer y pagar las cotizaciones a salud, pensión y ARL durante el periodo del despido.",
+                "Reconocer indemnización adicional de 180 días en casos de fuero de salud (Ley 361/97).",
+            ],
+            "pruebas_sugeridas": (
+                "• Contrato laboral o constancia de la relación (recibos, correos, OPS sucesivos).\n"
+                "• Comprobantes de pago de los últimos 6 meses.\n"
+                "• Carta de despido o renuncia (si la hubo).\n"
+                "• Certificación médica si hay fuero de salud o maternidad.\n"
+                "• Constancia de afiliación a EPS y AFP (RUAF).\n"
+                "• Si hay acoso laboral: testimonios, comunicaciones, memorandos.\n"
+                "• Liquidación recibida (si la pagaron) para detectar diferencias."
+            ),
+            "medida_provisional_arg": (
+                "El trabajador y su núcleo familiar dependen del salario para subsistencia. La pérdida del empleo "
+                "y la desafiliación a seguridad social vulneran el mínimo vital, la salud y la seguridad social. "
+                "En casos con fuero, la jurisprudencia exige reintegro inmediato vía medida provisional para "
+                "evitar perjuicio irremediable (SU-070/2013, SU-049/2017)."
+            ),
+            "stats_custom": [
+                {"num": "60 días", "label": "indemnización fuero materno"},
+                {"num": "180 días", "label": "indemnización fuero salud"},
+                {"num": "+310", "label": "casos laborales asistidos"},
+                {"num": "$0", "label": "sin cobro hasta cobrar"},
+            ],
+            "trust_block": [
+                {"title": "Fueros, nuestro fuerte",
+                 "desc": "Maternidad, salud, sindical, prepensión: sabemos qué pruebas pedir y qué jurisprudencia aplicar."},
+                {"title": "Cifras claras",
+                 "desc": "Te decimos cuánto te corresponde por liquidación, indemnización y mora antes de radicar."},
+                {"title": "Cuota litis",
+                 "desc": "Cobramos solo un porcentaje de lo recuperado. Si no cobras, no pagas honorarios."},
+            ],
+            "footer_extra": "CST · Ley 361/97 · Ley 1010/2006 (acoso laboral) · SU-070/2013 · SU-049/2017.",
+        },
+    ]

@@ -232,9 +232,32 @@ C.C. {block_cedula}
 
 # ── Generador principal ───────────────────────────────────────────────────────
 
+def _aplicar_landing_template(template: str, descripcion: str,
+                              datos_cliente: Optional[dict],
+                              contexto: str) -> str:
+    """Reemplaza placeholders {{nombre}}, {{cedula}}, {{ciudad}}, {{accionado}},
+    {{descripcion}}, {{contexto_juris}} en el template del vertical."""
+    dc = datos_cliente or {}
+    repl = {
+        "nombre":        dc.get("nombre") or dc.get("name") or "[COMPLETAR nombre]",
+        "cedula":        dc.get("cedula") or "[COMPLETAR cédula]",
+        "ciudad":        dc.get("ciudad") or "Bogotá D.C.",
+        "accionado":     dc.get("accionado") or "[COMPLETAR accionado]",
+        "phone":         dc.get("phone") or "[COMPLETAR teléfono]",
+        "email":         dc.get("email") or "[COMPLETAR correo]",
+        "descripcion":   descripcion,
+        "contexto_juris": contexto,
+    }
+    out = template
+    for k, v in repl.items():
+        out = out.replace("{{" + k + "}}", str(v))
+    return out
+
+
 def generar_borrador(motor, descripcion: str, area: Optional[str] = None,
                      datos_cliente: Optional[dict] = None,
-                     usar_cache: bool = True) -> dict:
+                     usar_cache: bool = True,
+                     landing_cfg: Optional[dict] = None) -> dict:
     """
     motor: instancia de MotorRAG (con FAISS listo o BM25 como mínimo).
     Retorna dict: {draft, fichas, area_detectada, cached, tokens_aprox}
@@ -244,7 +267,10 @@ def generar_borrador(motor, descripcion: str, area: Optional[str] = None,
         return {"error": "Descripción demasiado corta. Cuente al menos: qué pasó, quién es el accionado y desde cuándo.",
                 "draft": "", "fichas": []}
 
-    if not area:
+    # Si hay landing_cfg con area_focus, ESE manda y es estricto
+    if landing_cfg and landing_cfg.get("area_focus"):
+        area = landing_cfg["area_focus"]
+    elif not area:
         area = detectar_area(descripcion)
 
     # Cache: incluye datos que cambian el texto (nombre, cedula, accionado, ciudad)
@@ -269,7 +295,12 @@ def generar_borrador(motor, descripcion: str, area: Optional[str] = None,
                 "draft": "", "fichas": []}
 
     contexto = motor._construir_contexto(fichas)
-    prompt   = _prompt_publico(descripcion, contexto, datos_cliente)
+    # Si la landing trae prompt_template propio, úsalo. Si no, el genérico.
+    if landing_cfg and (landing_cfg.get("prompt_template") or "").strip():
+        prompt = _aplicar_landing_template(
+            landing_cfg["prompt_template"], descripcion, datos_cliente, contexto)
+    else:
+        prompt = _prompt_publico(descripcion, contexto, datos_cliente)
 
     from google.genai import types as genai_types
 

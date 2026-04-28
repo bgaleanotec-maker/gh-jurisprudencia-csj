@@ -22,11 +22,18 @@ def landing_html(config: dict = None) -> str:
     SUBT = cfg.get("subtitulo") or "Describe tu caso. Cruzamos tu situación con sentencias reales de la Corte Suprema y te mostramos, en minutos, qué dice la ley y cuál es tu mejor camino."
     VIDEO_URL = cfg.get("video_url") or ""
     CTA_TXT = cfg.get("cta_texto") or "Conocer mi caso"
-    CASOS_FILTRO = cfg.get("casos_filtro") or []           # áreas a mostrar (lista vacía = todas)
+    CASOS_FILTRO = cfg.get("casos_filtro") or []
     CASOS_EXTRA = cfg.get("casos_extra") or []
+    CASOS_CURADOS = cfg.get("casos_curados") or []           # nuevo: hand-picked
     FAQ_EXTRA = cfg.get("faq_extra") or []
     AREA_FOCUS = cfg.get("area_focus") or ""
     UTM_DEF = cfg.get("utm_default") or ""
+    HERO_ICON = cfg.get("hero_icon") or ""
+    ACCENT = cfg.get("color_acento") or "#C5A059"             # default oro
+    STATS_CUSTOM = cfg.get("stats_custom") or []
+    TRUST_BLOCK = cfg.get("trust_block") or []
+    FOOTER_EXTRA = cfg.get("footer_extra") or ""
+    TONE = cfg.get("tone") or "explicativo"
 
     # Si tiene H1 personalizado, lo usamos textual; el resaltado va en oro si aparece dentro
     if H1_RES and H1_RES in H1:
@@ -390,7 +397,24 @@ def landing_html(config: dict = None) -> str:
   </nav>
 </header>
 
+<style>
+  /* Vertical accent override */
+  :root { --acento: """ + ACCENT + """ !important; }
+  .hero::before { background: """ + ACCENT + """; }
+  .hero h1 .resaltar { color: """ + ACCENT + """; }
+  .badge-trust { border-color: """ + ACCENT + """44; }
+  .case-card .ab { background: """ + ACCENT + """22; color: """ + ACCENT + """; }
+  .case-card:hover .ab { background: """ + ACCENT + """; color: #fff; }
+  .case-card { border-top: 3px solid """ + ACCENT + """22; }
+  .case-card:hover { border-color: """ + ACCENT + """; }
+  .preview-blur .candado-box .icon, .hero-icon { color: """ + ACCENT + """; }
+  details summary::after { color: """ + ACCENT + """; }
+  .sch-add { border-color: """ + ACCENT + """; }
+  footer { border-top: 4px solid """ + ACCENT + """; }
+</style>
+
 <header class="hero" role="banner">
+  """ + (f'<div class="hero-icon" style="font-size:64px;line-height:1;margin-bottom:14px">{HERO_ICON}</div>' if HERO_ICON else '') + """
   <h1>""" + H1_HTML + """</h1>
   <p class="lead">""" + SUBT + """</p>
   <div class="badges">
@@ -403,18 +427,26 @@ def landing_html(config: dict = None) -> str:
 """ + VIDEO_HTML + """
 
 <section class="stats-bar" aria-label="Estadísticas de la plataforma">
-  <div class="grid">
+  <div class="grid">""" + (
+    "".join(f'<div class="stat"><div class="num">{s.get("num","")}</div><div class="lbl">{s.get("label","")}</div></div>'
+            for s in STATS_CUSTOM)
+    if STATS_CUSTOM else """
     <div class="stat"><div class="num" id="s-fichas">—</div><div class="lbl">Sentencias indexadas</div></div>
     <div class="stat"><div class="num">6</div><div class="lbl">Áreas legales cubiertas</div></div>
     <div class="stat"><div class="num">4</div><div class="lbl">Salas CSJ (Civil · Laboral · Penal · Plena)</div></div>
-    <div class="stat"><div class="num">$0</div><div class="lbl">Costo de la simulación</div></div>
+    <div class="stat"><div class="num">$0</div><div class="lbl">Costo de la simulación</div></div>"""
+  ) + """
   </div>
 </section>
 
-<!-- POR QUÉ CONFIAR (Cialdini: autoridad + prueba social honesta + reciprocidad) -->
 <section class="bloque" style="padding:40px 16px 16px">
   <div class="container-wide">
     <div class="casos-grid">
+      """ + (
+        "".join(f'<div class="caso"><div class="titulo">{b.get("title","")}</div>'
+                f'<div class="desc">{b.get("desc","")}</div></div>'
+                for b in TRUST_BLOCK)
+        if TRUST_BLOCK else """
       <div class="caso">
         <div class="titulo">Autoridad real</div>
         <div class="desc">Cada cita viene de una sentencia pública de la Corte Suprema de Justicia. Puedes verificar todos los radicados en <a href="https://relatoria.cortesuprema.gov.co" target="_blank" rel="noopener">relatoria.cortesuprema.gov.co</a>.</div>
@@ -426,7 +458,8 @@ def landing_html(config: dict = None) -> str:
       <div class="caso">
         <div class="titulo">Tus datos, protegidos</div>
         <div class="desc">Tratamos tu información bajo la Ley 1581 de 2012. Tienes derecho a consultar, actualizar, rectificar o suprimir tus datos en cualquier momento.</div>
-      </div>
+      </div>"""
+      ) + """
     </div>
   </div>
 </section>
@@ -442,6 +475,13 @@ def landing_html(config: dict = None) -> str:
     <button onclick="scrollCases(1)" aria-label="Siguiente">▶</button>
   </div>
   <div class="cases-scroll" id="cases-scroll" role="list" aria-label="Tipos de tutela más frecuentes">
+    """ + "".join(
+       f'<div class="case-card" data-area="{c.get("area","")}" data-ej="{(c.get("ej","") or "").replace(chr(34),chr(39))}">'
+       f'<span class="ab">{c.get("badge", c.get("area",""))}</span>'
+       f'<div class="tt">{c.get("ic","")} {c.get("tt","")}</div>'
+       f'<div class="ds">{c.get("ds","")}</div><div class="go">→</div></div>'
+       for c in (CASOS_CURADOS or [])
+    ) + """
     <!-- SALUD -->
     <div class="case-card" data-area="salud" data-ej="Mi EPS Sanitas me niega desde hace 2 meses la quimioterapia que me prescribió el oncólogo. Soy paciente con cáncer de mama y no he podido iniciar tratamiento. Ya radiqué PQR y no responden."><span class="ab salud">Salud</span><div class="tt">EPS niega medicamento oncológico</div><div class="ds">Quimioterapia, radioterapia o fármacos no POS que la EPS rechaza por "no cobertura".</div><div class="go">→</div></div>
     <div class="case-card" data-area="salud" data-ej="El ortopedista ordenó cirugía de rodilla hace 4 meses. La EPS dice que debo esperar autorización pero no avanza. Tengo dolor crónico y no puedo caminar bien."><span class="ab salud">Salud</span><div class="tt">Cirugía prescrita sin autorizar</div><div class="ds">Reemplazo de cadera, columna, cesárea programada y otras cirugías que se demoran meses.</div><div class="go">→</div></div>
@@ -825,6 +865,12 @@ def landing_html(config: dict = None) -> str:
   <div class="container">
     <h2 class="section-title">Preguntas frecuentes</h2>
     <p class="section-sub" style="margin-bottom:24px">Lo que la mayoría de personas pregunta antes de agendar.</p>
+
+    """ + "".join(
+       f'<details><summary>{(q.get("q","")).replace(chr(60),"&lt;")}</summary>'
+       f'<div class="body">{(q.get("a","")).replace(chr(60),"&lt;")}</div></details>'
+       for q in (FAQ_EXTRA or [])
+    ) + """
 
     <details><summary>¿Es realmente gratis?</summary>
     <div class="body">La simulación, el documento Word y la primera llamada de 30 minutos con un abogado son gratis. Para referencia, un abogado particular suele cobrar entre $400.000 y $1.000.000 por presentar una tutela de salud; nuestros honorarios para casos estándar se mueven en un rango considerablemente menor y los conversamos durante la llamada según la complejidad.</div></details>

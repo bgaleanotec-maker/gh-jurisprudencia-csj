@@ -203,6 +203,7 @@ class LeadPreviewReq(BaseModel):
     cedula: Optional[str] = None
     ciudad: Optional[str] = None
     accionado: Optional[str] = None
+    landing_slug: Optional[str] = None  # si viene, usa el motor del vertical
 
 class LeadRegisterReq(BaseModel):
     token: str
@@ -244,6 +245,12 @@ async def lead_preview(req: LeadPreviewReq, request: Request):
         cache_extra = "|".join(str(datos_orient.get(k,"")).lower() for k in ("nombre","cedula","accionado","ciudad"))
     hit = tl.cache_get(req.descripcion, area_auto, extra=cache_extra)
     motor = get_motor()
+    # Si la request viene de una landing custom, cargo su config para inyectar
+    # el prompt específico, el filtro estricto y demás.
+    landing_cfg = None
+    if req.landing_slug:
+        landing_cfg = db_mod.get_landing_by_slug(req.landing_slug)
+
     if hit:
         res = dict(hit); res["cached"] = True
     else:
@@ -251,7 +258,8 @@ async def lead_preview(req: LeadPreviewReq, request: Request):
         if not db_mod.check_rate(ip, max_per_hour=15):
             raise HTTPException(429, "Has excedido el límite de simulaciones por hora desde esta conexión. Intenta en 1 hora o escríbenos por WhatsApp.")
         res = tl.generar_borrador(motor, req.descripcion, area=req.area,
-                                  datos_cliente=datos_orient)
+                                  datos_cliente=datos_orient,
+                                  landing_cfg=landing_cfg)
     if "error" in res:
         msg = res.get("user_message") or res["error"]
         code = 503 if res["error"] == "rate_limited" else 400
@@ -1226,12 +1234,23 @@ class LandingBody(BaseModel):
     accionado_label: str = Field("Entidad accionada", max_length=80)
     accionado_placeholder: str = Field("", max_length=160)
     video_url: str = Field("", max_length=400)
-    casos_filtro: list = []          # ej: ["salud","laboral"] para mostrar solo esas
-    casos_extra: list = []           # custom cases [{title, desc, ej, area}]
-    faq_extra: list = []             # [{q, a}]
+    casos_filtro: list = []
+    casos_extra: list = []
+    faq_extra: list = []
     cta_texto: str = Field("Conocer mi caso", max_length=60)
     color_acento: str = Field("", max_length=12)
     utm_default: str = Field("", max_length=80)
+    # Campos vertical-aware
+    hero_icon: str = Field("", max_length=8)
+    casos_curados: list = []                    # cards hand-picked para el carrusel
+    prompt_template: str = ""                    # con {{nombre}}, {{cedula}}, etc.
+    pretensiones_template: list = []             # [strings]
+    pruebas_sugeridas: str = ""
+    medida_provisional_arg: str = ""
+    tone: str = Field("", max_length=20)
+    stats_custom: list = []                      # [{num, label}]
+    trust_block: list = []                       # [{title, desc}]
+    footer_extra: str = ""
 
 
 @app.get("/api/admin/landings", dependencies=[Depends(admin_auth)])
