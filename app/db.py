@@ -1352,6 +1352,108 @@ def _migrate() -> None:
             if col not in cols_l:
                 c.execute(f"ALTER TABLE landings ADD COLUMN {col} {tipo}")
 
+        # ─── WhatsApp / Evolution: tablas para flujo conversacional ──────────
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS wa_conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            phone TEXT NOT NULL UNIQUE,           -- 573XXX, sin +
+            lead_id INTEGER REFERENCES leads(id),
+            estado TEXT NOT NULL DEFAULT 'lead_nuevo',
+                -- lead_nuevo / lead_calificado / lead_agendado / cliente / cliente_activo /
+                -- ganado / perdido / archivado_no_califica / cancelado
+            modo TEXT NOT NULL DEFAULT 'auto',    -- auto (sigue config global) / ia / humano
+            assigned_lawyer_id INTEGER REFERENCES lawyers(id),
+            datos_capturados TEXT,                -- JSON: {nombre,cedula,ciudad,accionado,vertical,...}
+            ultima_intencion TEXT,                -- saludo / agendar / cancelar / envio_doc / pregunta_juridica / etc
+            ultimo_mensaje_at TEXT,
+            ultima_respuesta_at TEXT,
+            mensajes_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_wa_conv_estado ON wa_conversations(estado);
+        CREATE INDEX IF NOT EXISTS idx_wa_conv_lead ON wa_conversations(lead_id);
+        CREATE INDEX IF NOT EXISTS idx_wa_conv_last ON wa_conversations(ultimo_mensaje_at DESC);
+
+        CREATE TABLE IF NOT EXISTS wa_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            evolution_message_id TEXT UNIQUE,     -- id Evolution (deduplicación idempotente)
+            conversation_id INTEGER NOT NULL REFERENCES wa_conversations(id),
+            phone TEXT NOT NULL,
+            direction TEXT NOT NULL,              -- 'in' | 'out'
+            kind TEXT NOT NULL,                   -- text / image / document / audio / video / sticker / location
+            text TEXT,                            -- contenido textual o caption
+            media_url TEXT,                       -- URL Evolution
+            media_path TEXT,                      -- path local si se descargó
+            mime_type TEXT,
+            filename TEXT,
+            ai_intencion TEXT,                    -- intención clasificada por IA
+            ai_handled INTEGER NOT NULL DEFAULT 0,-- 1 si la IA ya procesó
+            raw_event TEXT,                       -- JSON crudo del webhook
+            ts TEXT NOT NULL,                     -- timestamp del msg en Evolution (ISO)
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_wa_msg_conv ON wa_messages(conversation_id, ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_wa_msg_phone ON wa_messages(phone, ts DESC);
+
+        CREATE TABLE IF NOT EXISTS wa_documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL REFERENCES wa_conversations(id),
+            message_id INTEGER REFERENCES wa_messages(id),
+            lead_id INTEGER REFERENCES leads(id),
+            categoria TEXT,                       -- cedula/contrato/comparendo/hist_clinica/foto/otro
+            filename TEXT,
+            path TEXT,
+            mime_type TEXT,
+            size_bytes INTEGER,
+            sha256 TEXT,
+            classified_by_ai INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_wa_docs_lead ON wa_documents(lead_id);
+        CREATE INDEX IF NOT EXISTS idx_wa_docs_conv ON wa_documents(conversation_id);
+
+        CREATE TABLE IF NOT EXISTS wa_config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS wa_escalations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id INTEGER NOT NULL REFERENCES wa_conversations(id),
+            lawyer_id INTEGER REFERENCES lawyers(id),
+            reason TEXT,                          -- 'cliente_activo' / 'queja' / 'ia_inseguro' / 'manual'
+            resolved INTEGER NOT NULL DEFAULT 0,
+            resolved_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_wa_esc_resolved ON wa_escalations(resolved, created_at DESC);
+        """)
+
+        # Defaults de wa_config (idempotente)
+        defaults_wa = {
+            "mode_global": "hibrido",         # ia | humano | hibrido
+            "office_hours_start": "08:00",
+            "office_hours_end": "18:00",
+            "office_days": "1,2,3,4,5",       # lun-vie (1=lun .. 7=dom)
+            "mode_outside_hours": "ia",       # qué modo aplicar fuera de oficina
+            "evolution_instance": "abogados-hseq",
+            "welcome_message": (
+                "Hola, soy el asistente jurídico de Galeano Herrera | Abogados. "
+                "Cuéntame brevemente qué te pasa y te ayudo a saber si tienes caso. "
+                "Esta conversación queda protegida por habeas data (Ley 1581/2012)."
+            ),
+            "outside_hours_message": (
+                "Recibí tu mensaje. Estoy fuera del horario de oficina pero te respondo "
+                "por aquí. Si requiere atención humana inmediata, mañana a primera hora "
+                "te llama un abogado."
+            ),
+            "escalation_wa_group": "",        # JID del grupo del despacho (vacío = sin push WA)
+            "ai_disabled": "0",               # circuito de emergencia: 1 = no llamar IA
+        }
+        for k, v in defaults_wa.items():
+            c.execute("INSERT OR IGNORE INTO wa_config(key,value) VALUES(?,?)", (k, v))
+
 
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 
@@ -1835,3 +1937,311 @@ def _vertical_seeds() -> list[dict]:
             "footer_extra": "CST · Ley 361/97 · Ley 1010/2006 (acoso laboral) · SU-070/2013 · SU-049/2017.",
         },
     ]
+
+
+# ============================================================================
+# WhatsApp / Evolution: CRUD para conversaciones, mensajes, documentos y config
+# ============================================================================
+
+# Estados válidos para wa_conversations.estado (transiciones controladas en wa_brain)
+WA_ESTADOS = {
+    "lead_nuevo", "lead_calificado", "lead_agendado",
+    "cliente", "cliente_activo",
+    "ganado", "perdido", "archivado_no_califica", "cancelado",
+}
+
+
+def _norm_phone(phone: str) -> str:
+    """Normaliza al formato 573XXXXXXXXX (sin '+', sin '@s.whatsapp.net', sin espacios)."""
+    if not phone:
+        return ""
+    p = str(phone).strip()
+    # quitar sufijo de Evolution / WhatsApp
+    for suf in ("@s.whatsapp.net", "@c.us", "@g.us"):
+        if p.endswith(suf):
+            p = p.split("@", 1)[0]
+    p = p.replace("+", "").replace(" ", "").replace("-", "")
+    # asegurar prefijo país Colombia si vienen 10 dígitos típicos
+    if len(p) == 10 and p.startswith("3"):
+        p = "57" + p
+    return p
+
+
+# ── wa_config (key/value store) ──────────────────────────────────────────────
+
+def wa_config_get(key: str, default: str = "") -> str:
+    with db() as c:
+        r = c.execute("SELECT value FROM wa_config WHERE key=?", (key,)).fetchone()
+        return r["value"] if r else default
+
+
+def wa_config_get_all() -> dict:
+    with db() as c:
+        return {r["key"]: r["value"] for r in c.execute("SELECT key,value FROM wa_config")}
+
+
+def wa_config_set(key: str, value: str) -> None:
+    with db() as c:
+        c.execute(
+            "INSERT INTO wa_config(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')",
+            (key, str(value)),
+        )
+
+
+def wa_config_bulk_set(items: dict) -> None:
+    with db() as c:
+        for k, v in items.items():
+            c.execute(
+                "INSERT INTO wa_config(key,value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')",
+                (k, str(v)),
+            )
+
+
+# ── wa_conversations ─────────────────────────────────────────────────────────
+
+def wa_conv_get_by_phone(phone: str) -> Optional[dict]:
+    p = _norm_phone(phone)
+    with db() as c:
+        r = c.execute("SELECT * FROM wa_conversations WHERE phone=?", (p,)).fetchone()
+        if not r:
+            return None
+        d = dict(r)
+        try:
+            d["datos_capturados"] = json.loads(d.get("datos_capturados") or "{}")
+        except Exception:
+            d["datos_capturados"] = {}
+        return d
+
+
+def wa_conv_get_or_create(phone: str) -> dict:
+    """Idempotente: devuelve la conversación, creándola si no existe."""
+    p = _norm_phone(phone)
+    if not p:
+        raise ValueError("phone vacío")
+    with db() as c:
+        r = c.execute("SELECT * FROM wa_conversations WHERE phone=?", (p,)).fetchone()
+        if r is None:
+            c.execute(
+                "INSERT INTO wa_conversations(phone, estado, modo, datos_capturados) "
+                "VALUES(?,?,?,?)",
+                (p, "lead_nuevo", "auto", "{}"),
+            )
+            r = c.execute("SELECT * FROM wa_conversations WHERE phone=?", (p,)).fetchone()
+    d = dict(r)
+    try:
+        d["datos_capturados"] = json.loads(d.get("datos_capturados") or "{}")
+    except Exception:
+        d["datos_capturados"] = {}
+    return d
+
+
+def wa_conv_update(conv_id: int, **fields) -> None:
+    """Actualiza columnas permitidas. datos_capturados acepta dict (se merge-ea)."""
+    if not fields:
+        return
+    allowed = {
+        "lead_id", "estado", "modo", "assigned_lawyer_id",
+        "datos_capturados", "ultima_intencion",
+        "ultimo_mensaje_at", "ultima_respuesta_at",
+    }
+    sets, vals = [], []
+    with db() as c:
+        # Merge para datos_capturados si viene dict
+        if "datos_capturados" in fields and isinstance(fields["datos_capturados"], dict):
+            cur = c.execute(
+                "SELECT datos_capturados FROM wa_conversations WHERE id=?", (conv_id,)
+            ).fetchone()
+            base = {}
+            if cur and cur["datos_capturados"]:
+                try:
+                    base = json.loads(cur["datos_capturados"])
+                except Exception:
+                    base = {}
+            merged = {**base, **fields["datos_capturados"]}
+            fields["datos_capturados"] = json.dumps(merged, ensure_ascii=False)
+
+        if "estado" in fields and fields["estado"] not in WA_ESTADOS:
+            raise ValueError(f"estado inválido: {fields['estado']}")
+
+        for k, v in fields.items():
+            if k not in allowed:
+                continue
+            sets.append(f"{k}=?")
+            vals.append(v)
+        if not sets:
+            return
+        vals.append(conv_id)
+        c.execute(f"UPDATE wa_conversations SET {', '.join(sets)} WHERE id=?", vals)
+
+
+def wa_conv_inc_msg_count(conv_id: int) -> None:
+    with db() as c:
+        c.execute(
+            "UPDATE wa_conversations SET mensajes_count = mensajes_count + 1, "
+            "ultimo_mensaje_at = datetime('now') WHERE id=?",
+            (conv_id,),
+        )
+
+
+def wa_conv_list(estado: Optional[str] = None, limit: int = 100) -> list[dict]:
+    sql = "SELECT * FROM wa_conversations"
+    args: list = []
+    if estado:
+        sql += " WHERE estado=?"
+        args.append(estado)
+    sql += " ORDER BY ultimo_mensaje_at DESC NULLS LAST, created_at DESC LIMIT ?"
+    args.append(limit)
+    out = []
+    with db() as c:
+        for r in c.execute(sql, args):
+            d = dict(r)
+            try:
+                d["datos_capturados"] = json.loads(d.get("datos_capturados") or "{}")
+            except Exception:
+                d["datos_capturados"] = {}
+            out.append(d)
+    return out
+
+
+# ── wa_messages ──────────────────────────────────────────────────────────────
+
+def wa_msg_exists(evolution_message_id: str) -> bool:
+    if not evolution_message_id:
+        return False
+    with db() as c:
+        r = c.execute(
+            "SELECT 1 FROM wa_messages WHERE evolution_message_id=?",
+            (evolution_message_id,),
+        ).fetchone()
+        return r is not None
+
+
+def wa_msg_save(
+    *,
+    evolution_message_id: Optional[str],
+    conversation_id: int,
+    phone: str,
+    direction: str,                  # 'in' | 'out'
+    kind: str,                       # text/image/document/audio/video/sticker/location
+    text: Optional[str] = None,
+    media_url: Optional[str] = None,
+    media_path: Optional[str] = None,
+    mime_type: Optional[str] = None,
+    filename: Optional[str] = None,
+    raw_event: Optional[dict] = None,
+    ts: Optional[str] = None,
+) -> Optional[int]:
+    """Devuelve el id del mensaje insertado, o None si era duplicado."""
+    if direction not in ("in", "out"):
+        raise ValueError("direction debe ser 'in' o 'out'")
+    with db() as c:
+        if evolution_message_id:
+            r = c.execute(
+                "SELECT id FROM wa_messages WHERE evolution_message_id=?",
+                (evolution_message_id,),
+            ).fetchone()
+            if r:
+                return None  # duplicado, idempotente
+        cur = c.execute(
+            """INSERT INTO wa_messages
+                  (evolution_message_id, conversation_id, phone, direction, kind,
+                   text, media_url, media_path, mime_type, filename, raw_event, ts)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                evolution_message_id, conversation_id, _norm_phone(phone), direction, kind,
+                text, media_url, media_path, mime_type, filename,
+                json.dumps(raw_event, ensure_ascii=False) if raw_event else None,
+                ts or datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+        return cur.lastrowid
+
+
+def wa_msg_set_ai(msg_id: int, intencion: str) -> None:
+    with db() as c:
+        c.execute(
+            "UPDATE wa_messages SET ai_intencion=?, ai_handled=1 WHERE id=?",
+            (intencion, msg_id),
+        )
+
+
+def wa_msg_history(conversation_id: int, limit: int = 20) -> list[dict]:
+    """Últimos N mensajes (orden cronológico ascendente para feed a la IA)."""
+    with db() as c:
+        rows = c.execute(
+            "SELECT id, direction, kind, text, ts FROM wa_messages "
+            "WHERE conversation_id=? ORDER BY ts DESC LIMIT ?",
+            (conversation_id, limit),
+        ).fetchall()
+    return [dict(r) for r in reversed(rows)]
+
+
+# ── wa_documents ─────────────────────────────────────────────────────────────
+
+def wa_doc_save(
+    *,
+    conversation_id: int,
+    message_id: Optional[int],
+    lead_id: Optional[int],
+    categoria: str,
+    filename: str,
+    path: str,
+    mime_type: Optional[str] = None,
+    size_bytes: Optional[int] = None,
+    sha256: Optional[str] = None,
+    classified_by_ai: bool = False,
+) -> int:
+    with db() as c:
+        cur = c.execute(
+            """INSERT INTO wa_documents
+                  (conversation_id, message_id, lead_id, categoria, filename, path,
+                   mime_type, size_bytes, sha256, classified_by_ai)
+               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            (conversation_id, message_id, lead_id, categoria, filename, path,
+             mime_type, size_bytes, sha256, 1 if classified_by_ai else 0),
+        )
+        return cur.lastrowid
+
+
+def wa_docs_for_lead(lead_id: int) -> list[dict]:
+    with db() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM wa_documents WHERE lead_id=? ORDER BY created_at DESC",
+            (lead_id,),
+        )]
+
+
+# ── wa_escalations ───────────────────────────────────────────────────────────
+
+def wa_escalate(
+    *,
+    conversation_id: int,
+    lawyer_id: Optional[int] = None,
+    reason: str = "manual",
+) -> int:
+    with db() as c:
+        cur = c.execute(
+            "INSERT INTO wa_escalations(conversation_id, lawyer_id, reason) VALUES(?,?,?)",
+            (conversation_id, lawyer_id, reason),
+        )
+        return cur.lastrowid
+
+
+def wa_escalations_pending(limit: int = 50) -> list[dict]:
+    with db() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT e.*, c.phone, c.estado, c.datos_capturados "
+            "FROM wa_escalations e JOIN wa_conversations c ON c.id = e.conversation_id "
+            "WHERE e.resolved=0 ORDER BY e.created_at DESC LIMIT ?",
+            (limit,),
+        )]
+
+
+def wa_escalation_resolve(esc_id: int) -> None:
+    with db() as c:
+        c.execute(
+            "UPDATE wa_escalations SET resolved=1, resolved_at=datetime('now') WHERE id=?",
+            (esc_id,),
+        )

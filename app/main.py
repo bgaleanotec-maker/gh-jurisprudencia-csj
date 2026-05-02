@@ -54,6 +54,7 @@ from app import agenda as ag
 from app import auth as auth_mod
 from app import og_image as og_mod
 from app import rag_ingest as rag_in
+from app import wa_inbound as wa_in
 
 # ── App ────────────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,9 @@ app = FastAPI(
     version="4.0.0",
 )
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# ── Router WhatsApp / Evolution (webhook entrante + sender) ───────────────────
+app.include_router(wa_in.router)
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
