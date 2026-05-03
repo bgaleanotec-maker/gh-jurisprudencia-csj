@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import threading
 import time
 import urllib.parse
@@ -58,19 +59,8 @@ def _evo_instance() -> str:
 
 # ── Sender: enviar texto a un número vía Evolution API ──────────────────────
 
-def enviar_texto(phone: str, text: str, *, instance: Optional[str] = None) -> dict:
-    """POST /message/sendText/{instance}.
-
-    Devuelve dict {ok, status, response | error}.
-    """
-    if not text:
-        return {"ok": False, "error": "empty_text"}
-    inst = instance or _evo_instance()
-    url = f"{_evo_url()}/message/sendText/{inst}"
-    body = {
-        "number": db_mod._norm_phone(phone),
-        "text": text,
-    }
+def _http_post_json(url: str, body: dict, timeout: int = 15) -> dict:
+    """Wrapper HTTP POST con apikey. Devuelve {ok, status, response|error}."""
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
@@ -81,11 +71,89 @@ def enviar_texto(phone: str, text: str, *, instance: Optional[str] = None) -> di
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8", errors="replace")
-            return {"ok": True, "status": resp.status, "response": raw[:1000]}
+            return {"ok": True, "status": resp.status, "response": raw[:1500]}
     except Exception as e:
         return {"ok": False, "error": str(e)[:300]}
+
+
+def enviar_presence(phone: str, presence: str = "composing",
+                    delay_ms: int = 3000, *, instance: Optional[str] = None) -> dict:
+    """Envía indicador de presencia ('composing' = 'escribiendo...', 'paused', 'available')."""
+    inst = instance or _evo_instance()
+    url = f"{_evo_url()}/chat/sendPresence/{inst}"
+    body = {
+        "number": db_mod._norm_phone(phone),
+        "delay": int(delay_ms),
+        "presence": presence,
+    }
+    return _http_post_json(url, body, timeout=8)
+
+
+def marcar_leido(remote_jid: str, message_id: str,
+                 *, instance: Optional[str] = None) -> dict:
+    """Marca un mensaje como leído (doble check azul). Mejora naturalidad."""
+    inst = instance or _evo_instance()
+    url = f"{_evo_url()}/chat/markMessageAsRead/{inst}"
+    body = {
+        "readMessages": [
+            {"remoteJid": remote_jid, "fromMe": False, "id": message_id}
+        ],
+    }
+    return _http_post_json(url, body, timeout=8)
+
+
+def _calcular_delay_typing_ms(text: str) -> int:
+    """Tiempo realista de tipeo humano + variación (~30-40 wpm).
+
+    Base 1.4s + 230ms/palabra, capped en 11s, ±20% jitter.
+    """
+    words = max(1, len(text.split()))
+    base = 1400 + words * 230
+    base = min(base, 11000)
+    return int(base * (0.85 + 0.3 * random.random()))
+
+
+def enviar_texto(phone: str, text: str, *, instance: Optional[str] = None,
+                 humanizar: bool = True) -> dict:
+    """Envía texto con presencia 'composing' previa para parecer humano.
+
+    Si humanizar=False, envía directo (útil para tests/admin/notificaciones internas).
+    """
+    if not text:
+        return {"ok": False, "error": "empty_text"}
+    inst = instance or _evo_instance()
+    phone_n = db_mod._norm_phone(phone)
+
+    if humanizar:
+        # 1) "escribiendo..." durante delay calculado
+        delay_ms = _calcular_delay_typing_ms(text)
+        try:
+            enviar_presence(phone_n, "composing", delay_ms, instance=inst)
+        except Exception:
+            pass  # presence falla → seguir igual
+        # 2) Esperar (bloqueante en el thread async, no en el webhook)
+        time.sleep(delay_ms / 1000.0)
+
+    # 3) Enviar el texto
+    url = f"{_evo_url()}/message/sendText/{inst}"
+    body = {"number": phone_n, "text": text}
+    return _http_post_json(url, body, timeout=15)
+
+
+def enviar_segmentos(phone: str, segmentos: list[str],
+                     *, instance: Optional[str] = None) -> list[dict]:
+    """Envía varios mensajes cortos como una persona real, con pausa entre cada uno."""
+    out = []
+    for i, seg in enumerate(segmentos):
+        if not seg or not seg.strip():
+            continue
+        if i > 0:
+            # Pausa corta natural entre mensajes consecutivos (0.6 - 1.6s)
+            time.sleep(0.6 + random.random() * 1.0)
+        out.append(enviar_texto(phone, seg.strip(), instance=instance, humanizar=True))
+    return out
 
 
 # ── Parseo de eventos Evolution ──────────────────────────────────────────────
@@ -176,13 +244,13 @@ def _extract_message(payload: dict) -> Optional[dict]:
 # ── Procesamiento (en background) ────────────────────────────────────────────
 
 def _procesar_async(payload: dict) -> None:
-    """Corre en thread separado: clasifica con IA y responde si aplica."""
+    """Corre en thread separado: clasifica con IA y responde como humano."""
     try:
         msg = _extract_message(payload)
         if not msg:
             return  # evento no procesable
 
-        # Idempotencia: si ya lo procesamos, salir
+        # Idempotencia
         if msg["evolution_message_id"] and db_mod.wa_msg_exists(msg["evolution_message_id"]):
             return
 
@@ -217,10 +285,21 @@ def _procesar_async(payload: dict) -> None:
 
         db_mod.wa_conv_inc_msg_count(conv["id"])
 
+        # Marcar mensaje como leído (doble check azul) — naturalidad humana
+        try:
+            remote_jid = (payload.get("data") or {}).get("key", {}).get("remoteJid", "")
+            if remote_jid and msg["evolution_message_id"]:
+                marcar_leido(remote_jid, msg["evolution_message_id"])
+        except Exception:
+            pass
+
+        # Pequeña pausa antes de "leer y procesar" (humano: ve el mensaje, piensa)
+        time.sleep(1.0 + random.random() * 1.5)  # 1.0-2.5s
+
         # Releer la conversación con datos_capturados frescos
         conv = db_mod.wa_conv_get_by_phone(msg["phone"]) or conv
 
-        # Orquestar
+        # Orquestar (Gemini decide qué responder y cómo)
         decision = wa_brain.procesar_mensaje_entrante(
             conv, msg_id_db, msg["text"] or "", kind=msg["kind"]
         )
@@ -238,7 +317,7 @@ def _procesar_async(payload: dict) -> None:
 
         db_mod.wa_msg_set_ai(msg_id_db, decision.get("intencion") or "INSEGURO")
 
-        # Escalar si la IA lo pide o si modo=humano
+        # Escalar si la IA lo pide o modo=humano
         if decision.get("escalar") or decision.get("modo_aplicado") == "humano":
             db_mod.wa_escalate(
                 conversation_id=conv["id"],
@@ -246,13 +325,18 @@ def _procesar_async(payload: dict) -> None:
                 reason=decision.get("razon_escalada") or decision.get("modo_aplicado"),
             )
 
-        # Enviar respuesta si la hay
-        respuesta = decision.get("respuesta")
-        if respuesta:
-            res = enviar_texto(msg["phone"], respuesta)
-            if res.get("ok"):
-                # Persistir mensaje saliente (no tenemos id Evolution antes de respuesta JSON,
-                # extraemos del response si viene)
+        # Enviar respuesta(s)
+        # wa_brain devuelve `respuesta` (str) o `respuestas` (list[str] = segmentos cortos)
+        segs = decision.get("respuestas") or []
+        if not segs and decision.get("respuesta"):
+            segs = [decision["respuesta"]]
+
+        if segs:
+            results = enviar_segmentos(msg["phone"], segs)
+            for i, (seg, res) in enumerate(zip(segs, results)):
+                if not res.get("ok"):
+                    print(f"[wa_inbound] error enviando seg {i}: {res.get('error')}")
+                    continue
                 evo_resp_id = None
                 try:
                     parsed = json.loads(res.get("response") or "{}")
@@ -265,16 +349,14 @@ def _procesar_async(payload: dict) -> None:
                     phone=msg["phone"],
                     direction="out",
                     kind="text",
-                    text=respuesta,
-                    raw_event={"sent_via": "evolution"},
+                    text=seg,
+                    raw_event={"sent_via": "evolution", "segment": i},
                     ts=datetime.now().isoformat(timespec="seconds"),
                 )
-                db_mod.wa_conv_update(
-                    conv["id"],
-                    ultima_respuesta_at=datetime.now().isoformat(timespec="seconds"),
-                )
-            else:
-                print(f"[wa_inbound] error enviando respuesta: {res.get('error')}")
+            db_mod.wa_conv_update(
+                conv["id"],
+                ultima_respuesta_at=datetime.now().isoformat(timespec="seconds"),
+            )
 
     except Exception as e:
         print(f"[wa_inbound] error procesando webhook: {e}")

@@ -76,65 +76,109 @@ def _get_genai():
 # ─── Prompt principal (combina clasificación + extracción + respuesta) ──────
 
 PROMPT_TEMPLATE = """\
-Eres el asistente de WhatsApp del despacho jurídico colombiano "Galeano Herrera | Abogados".
-Operas en Colombia, español neutro, tono cercano pero profesional. Respondes corto (máx 80 palabras).
+Eres MARÍA CAMILA, asistente del despacho jurídico colombiano "Galeano Herrera | Abogados".
+Atiendes el WhatsApp del despacho. Eres cercana, paciente, escuchas bien y haces sentir al
+cliente que está siendo entendido. Hablas como una colombiana de Bogotá: clara, calida,
+profesional pero sin tecnicismos.
 
+══════════════════════════════════ IDENTIDAD ══════════════════════════════════
+TU NOMBRE: María Camila (lo dices solo si te preguntan o en el primer saludo del día)
+TU CARGO: "asistente del despacho Galeano Herrera Abogados"
+NUNCA digas: "soy una IA", "soy un asistente virtual", "soy un bot", "soy automatizada",
+             "modelo de lenguaje", "no soy humana", "estoy programada".
+Si el cliente pregunta "¿eres una persona/IA/bot?":
+  → "Trabajo en el despacho atendiendo casos como el tuyo. Para eso estoy aquí 🙂"
+     (cambia tema hacia el caso del cliente, NO confirmes ni niegues robóticamente).
+
+══════════════════════════════════ TONO ══════════════════════════════════
+- Mensajes CORTOS: 1 a 3 frases por mensaje, máximo 35 palabras cada uno.
+- Cuando lo natural sea decir varias cosas, las DIVIDES en 2 ó 3 mensajes consecutivos.
+- Sin bullets ni listas con guiones. Estás en WhatsApp, no en un email.
+- Emojis muy escasos: máximo 1 emoji cada 4 mensajes, y solo cuando aporta calidez (🙂 ✅).
+- Errores ortográficos NO. Pero sí contracciones naturales ("estoy", "tienes", "te ayudo").
+- Cero promesas: NUNCA digas "vas a ganar", "te darán X pesos", "te garantizamos".
+- Cero invenciones: NUNCA cites una sentencia o cifra que no esté en datos del cliente.
+
+══════════════════════════════════ FLUJO DE VENTA ══════════════════════════════════
+Tu trabajo es:
+1. ESCUCHAR primero (1 mensaje empático).
+2. CALIFICAR el caso (capturar nombre + descripción + vertical).
+3. CERRAR con cita SOLO cuando esté calificado.
+
+REGLAS DE CITA:
+- NO propongas cita en el primer mensaje, jamás.
+- Solo propones cita si YA TIENES: nombre del cliente + descripción del problema + vertical claro.
+- Cuando propongas, ofrece la cita como acción concreta:
+    "¿Te parece si agendamos una llamada de 15 minutos con uno de los abogados?
+     Tengo disponibilidad mañana en la mañana o pasado mañana en la tarde."
+- Si el cliente acepta: pregunta el día/hora preferida.
+- Tras confirmar día/hora: termina con "Perfecto, te confirmo en un momento cuál abogado te atiende".
+
+══════════════════════════════════ CONTEXTO ══════════════════════════════════
 MODO ACTUAL: {modo}
-- Si modo='ia': escribes una respuesta breve y útil al cliente.
-- Si modo='humano': NO escribes respuesta (campo respuesta=null) — un abogado humano contestará.
+  - Si modo='ia': respondes tú.
+  - Si modo='humano': NO respondes (respuestas=[]). Un abogado tomará la conversación.
 
-CONTEXTO DE LA CONVERSACIÓN:
-- Estado del lead: {estado}
-- Vertical sospechado (si aplica): {vertical}
-- Datos ya capturados: {datos_capturados_json}
+ESTADO DEL LEAD: {estado}
+  - lead_nuevo: primer contacto, aún no tienes datos.
+  - lead_calificado: ya tienes nombre + descripción + vertical.
+  - lead_agendado: cita confirmada (no propongas otra).
+  - cliente / cliente_activo: ya tiene expediente, deriva a humano (modo siempre 'humano' aquí).
 
-VERTICALES DISPONIBLES (asigna el más cercano si lo identificas):
-- tutelas       (salud, pensión, derecho de petición, mínimo vital)
-- accidentes    (SOAT, accidente de tránsito, indemnización)
-- comparendos   (fotomultas, multas tránsito, cobro coactivo)
-- laboral       (despido, fuero, contrato realidad, acoso laboral)
+VERTICAL SOSPECHADO: {vertical}
+DATOS YA CAPTURADOS: {datos_capturados_json}
 
-HISTORIAL RECIENTE (más reciente abajo):
+══════════════════════════════════ VERTICALES ══════════════════════════════════
+- tutelas       → salud, pensión, derecho de petición, mínimo vital, EPS, Colpensiones
+- accidentes    → SOAT, accidente de tránsito, indemnización, lucro cesante
+- comparendos   → fotomultas, multas tránsito, cobro coactivo, SIMIT, embargos por multa
+- laboral       → despido, fuero materno/salud, contrato realidad, acoso, no pago de salarios
+
+══════════════════════════════════ HISTORIAL ══════════════════════════════════
 {history_block}
 
-ÚLTIMO MENSAJE DEL CLIENTE:
-"{text}"
+ÚLTIMO MENSAJE DEL CLIENTE: "{text}"
 
-INSTRUCCIONES:
-1. Clasifica intención del último mensaje EXACTAMENTE en una de:
+══════════════════════════════════ INSTRUCCIONES ══════════════════════════════════
+1. Clasifica intención EXACTAMENTE en una de:
    SALUDO | PREGUNTA_JURIDICA | AGENDAR | CANCELAR | ENVIO_DOC | ACTUALIZAR_DATOS |
    CONFIRMAR | NEGAR | QUEJA | FUERA_DE_TEMA | INSEGURO
 
-2. Extrae datos NUEVOS (deja vacío lo que ya esté capturado o no aparezca):
+2. Extrae datos NUEVOS (omite los ya capturados o que no aparezcan):
    nombre, cedula, ciudad, telefono, email, accionado, vertical, descripcion_caso
 
-3. Decide si el lead califica para uno de los 4 verticales (true) o si es FUERA_DE_TEMA (false).
+3. Si modo='ia':
+   - Genera entre 1 y 3 mensajes CORTOS (campo 'respuestas': lista de strings).
+   - Cada mensaje es una frase o dos. Como cuando escribes a un amigo en WhatsApp.
+   - Primer mensaje siempre EMPÁTICO si el cliente cuenta un problema ("Qué pena lo que pasó",
+     "Entiendo, eso es desgastante", "Cuenta con calma, te leo").
+   - Segundo mensaje: pregunta UNA cosa concreta o avanza el flujo.
+   - Tercer mensaje (opcional): solo si es necesario.
 
-4. Si modo='ia':
-   - Si faltan datos básicos (nombre + descripción del problema), pregunta UNO solo, amablemente.
-   - Si ya están: confirma vertical y propone agendar cita gratuita con un abogado (15-20 min).
-   - NUNCA inventes sentencias, números de fallo, ni cifras.
-   - NUNCA prometas resultado ("vas a ganar", "te van a dar X").
-   - NUNCA pidas datos sensibles innecesarios (clave, banco).
-   - Cierra con frase corta + invitación a continuar.
+4. Si la intención es QUEJA grave, FUERA_DE_TEMA persistente, o INSEGURO:
+   - respuestas=[] y escalar=true.
 
-5. Si la intención es QUEJA grave, FUERA_DE_TEMA persistente, o INSEGURO → respuesta=null y escalar=true.
+5. Si modo='humano':
+   - respuestas=[] (silencio total, no envíes nada).
 
-6. Sugiere transición de estado SOLO si tienes alta confianza:
-   - lead_nuevo → lead_calificado (cuando ya tienes nombre + descripción + vertical)
-   - lead_calificado → lead_agendado (cuando confirmó cita)
-   - cualquier → archivado_no_califica (si confirmaste FUERA_DE_TEMA)
+6. Sugiere transición SOLO con alta confianza:
+   - lead_nuevo → lead_calificado: tienes nombre + descripción + vertical.
+   - lead_calificado → lead_agendado: cliente confirmó día/hora.
+   - cualquier → archivado_no_califica: confirmaste FUERA_DE_TEMA.
 
-RESPONDE EXCLUSIVAMENTE CON UN JSON VÁLIDO (sin texto adicional) con esta forma:
+══════════════════════════════════ FORMATO DE SALIDA ══════════════════════════════════
+Responde EXCLUSIVAMENTE con JSON válido (sin markdown, sin texto extra) con esta forma exacta:
 {{
-  "intencion": "...",
-  "datos": {{ "nombre": "...", "cedula": "...", "ciudad": "...", "vertical": "...", "descripcion_caso": "..." }},
-  "respuesta": "..." | null,
-  "escalar": true | false,
-  "razon_escalada": "..." | null,
-  "transicion_estado": "lead_calificado" | "lead_agendado" | "archivado_no_califica" | null,
-  "califica": true | false
+  "intencion": "PREGUNTA_JURIDICA",
+  "datos": {{"nombre": "...", "vertical": "...", ...}},
+  "respuestas": ["mensaje 1 corto", "mensaje 2 corto"],
+  "escalar": false,
+  "razon_escalada": null,
+  "transicion_estado": null,
+  "califica": true
 }}
+
+Si modo='humano' o intención FUERA_DE_TEMA / QUEJA: usa respuestas=[].
 """
 
 
@@ -218,7 +262,7 @@ def _detectar_vertical_keyword(text: str) -> Optional[str]:
 
 
 def _fallback_sin_ia(conv: dict, text: str, modo: str) -> dict:
-    """Respuesta determinística cuando no hay IA disponible."""
+    """Respuesta determinística cuando no hay IA disponible. Sigue siendo humana."""
     txt = (text or "").strip()
     intencion = "PREGUNTA_JURIDICA"
     if not txt:
@@ -234,34 +278,48 @@ def _fallback_sin_ia(conv: dict, text: str, modo: str) -> dict:
 
     vertical = _detectar_vertical_keyword(txt)
 
-    cfg = db_mod.wa_config_get_all()
     if modo == "humano":
-        respuesta = None
+        respuestas: list[str] = []
     else:
         if intencion == "SALUDO":
-            respuesta = cfg.get("welcome_message") or "Hola, ¿en qué te ayudamos?"
+            respuestas = [
+                "Hola, te saluda María Camila del despacho Galeano Herrera Abogados.",
+                "Cuéntame con calma qué te está pasando y miramos cómo te ayudamos.",
+            ]
         elif intencion == "QUEJA":
-            respuesta = None  # escalar
+            respuestas = []  # escalar
         elif intencion == "AGENDAR":
-            respuesta = "Listo, vamos a agendar. ¿Para qué día y hora te queda mejor?"
+            respuestas = [
+                "Claro que sí, podemos agendar.",
+                "¿Antes me cuentas brevemente qué te pasó? Así te asigno el abogado más adecuado.",
+            ]
         elif intencion == "CANCELAR":
-            respuesta = "Entendido, cancelo. Si quieres reagendar, escríbeme cuándo te queda bien."
+            respuestas = [
+                "Entendido, marco como cancelado.",
+                "Cuando quieras retomar, solo escríbeme acá.",
+            ]
         elif vertical:
-            respuesta = (
-                f"Gracias. Tu caso parece de {vertical}. "
-                "Cuéntame tu nombre completo y describe brevemente lo que pasó "
-                "para revisar si puedo ayudarte."
-            )
+            mapa = {
+                "tutelas": "salud o pensión",
+                "accidentes": "accidente de tránsito",
+                "comparendos": "comparendos o multas",
+                "laboral": "tema laboral",
+            }
+            tema = mapa.get(vertical, vertical)
+            respuestas = [
+                f"Entiendo, tu caso parece relacionado con {tema}.",
+                "¿Me dices tu nombre completo y me cuentas en una o dos frases qué pasó exactamente?",
+            ]
         else:
-            respuesta = (
-                "Recibí tu mensaje. Cuéntame brevemente qué te pasa para "
-                "ver si puedo ayudarte (salud, accidente, comparendo, laboral)."
-            )
+            respuestas = [
+                "Recibí tu mensaje.",
+                "Cuéntame qué te está pasando: ¿es algo de salud, un accidente, una multa, o un tema laboral?",
+            ]
 
     return {
         "intencion": intencion,
         "datos": {"vertical": vertical} if vertical else {},
-        "respuesta": respuesta,
+        "respuestas": respuestas,
         "escalar": intencion == "QUEJA",
         "razon_escalada": "queja_keywords" if intencion == "QUEJA" else None,
         "transicion_estado": None,
@@ -296,16 +354,16 @@ def procesar_mensaje_entrante(
     # Si la IA está desactivada por bandera o no hay key, fallback
     ia_off = cfg.get("ai_disabled", "0") == "1" or not (os.environ.get("GEMINI_API_KEY") or "").strip()
 
-    # Mensajes no-texto (foto, doc, audio): sin IA texto-a-texto, marcar y escalar/aceptar
+    # Mensajes no-texto (foto, doc, audio): sin IA texto-a-texto, acuse humano
     if kind in ("image", "document", "audio", "video", "sticker", "location"):
-        respuesta = (
-            "Recibí tu archivo. Lo guardé en tu expediente. ¿Quieres añadir alguna nota?"
-            if modo == "ia" else None
+        respuestas = (
+            ["Listo, lo recibí.", "Le doy una mirada y te confirmo en un momento."]
+            if modo == "ia" else []
         )
         return {
             "intencion": "ENVIO_DOC",
             "datos_extraidos": {},
-            "respuesta": respuesta,
+            "respuestas": respuestas,
             "modo_aplicado": modo,
             "escalar": False,
             "razon_escalada": None,
@@ -314,7 +372,6 @@ def procesar_mensaje_entrante(
         }
 
     history = db_mod.wa_msg_history(conv["id"], limit=14)
-    # excluir el último (es el actual que ya quedó persistido)
     history_block = _format_history(history[:-1] if history else [])
 
     if ia_off:
@@ -322,7 +379,7 @@ def procesar_mensaje_entrante(
         return {
             "intencion": out["intencion"],
             "datos_extraidos": out["datos"],
-            "respuesta": out["respuesta"],
+            "respuestas": out["respuestas"],
             "modo_aplicado": modo,
             "escalar": out["escalar"],
             "razon_escalada": out["razon_escalada"],
@@ -342,12 +399,11 @@ def procesar_mensaje_entrante(
 
     out = _llamar_gemini_json(prompt, max_tokens=800)
     if not out:
-        # Fallback si Gemini falló
         fb = _fallback_sin_ia(conv, text, modo)
         return {
             "intencion": fb["intencion"],
             "datos_extraidos": fb["datos"],
-            "respuesta": fb["respuesta"],
+            "respuestas": fb["respuestas"],
             "modo_aplicado": modo,
             "escalar": fb["escalar"],
             "razon_escalada": fb["razon_escalada"] or "gemini_fallo",
@@ -363,9 +419,9 @@ def procesar_mensaje_entrante(
     datos = out.get("datos") or {}
     if not isinstance(datos, dict):
         datos = {}
-    # filtrar keys vacíos / inválidos
-    datos = {k: v for k, v in datos.items() if v not in (None, "", "null") and v != "..." and isinstance(v, (str, int))}
-    if datos.get("vertical") and datos["vertical"].lower() not in VERTICALES:
+    datos = {k: v for k, v in datos.items()
+             if v not in (None, "", "null") and v != "..." and isinstance(v, (str, int))}
+    if datos.get("vertical") and str(datos["vertical"]).lower() not in VERTICALES:
         datos.pop("vertical", None)
 
     transicion = out.get("transicion_estado")
@@ -374,21 +430,64 @@ def procesar_mensaje_entrante(
         if transicion not in TRANSICIONES_OK.get(origen, set()):
             transicion = None
 
-    respuesta = out.get("respuesta")
-    if respuesta and not isinstance(respuesta, str):
-        respuesta = None
-    if respuesta:
-        respuesta = respuesta.strip()[:1200]
+    # Acepta tanto "respuestas" (lista) como "respuesta" (string single — compat)
+    respuestas: list[str] = []
+    raw_resp = out.get("respuestas")
+    if isinstance(raw_resp, list):
+        for r in raw_resp:
+            if isinstance(r, str) and r.strip():
+                respuestas.append(_sanitizar_respuesta(r.strip())[:600])
+    elif isinstance(out.get("respuesta"), str) and out["respuesta"].strip():
+        respuestas = [_sanitizar_respuesta(out["respuesta"].strip())[:1200]]
+
+    # Cap a 3 segmentos máximo (no spamear)
+    respuestas = respuestas[:3]
+
     if modo == "humano":
-        respuesta = None  # forzar silencio si modo humano
+        respuestas = []  # silencio total en modo humano
 
     return {
         "intencion": intencion,
         "datos_extraidos": datos,
-        "respuesta": respuesta,
+        "respuestas": respuestas,
         "modo_aplicado": modo,
         "escalar": bool(out.get("escalar")),
         "razon_escalada": out.get("razon_escalada"),
         "transicion_estado": transicion,
         "usado_fallback": False,
     }
+
+
+# ─── Sanitización de respuesta (anti-detección como IA) ──────────────────────
+
+# Frases que delatan ser IA — si aparecen, las reemplazamos
+_FRASES_IA = [
+    (re.compile(r"\bcomo\s+(asistente\s+)?(ia|inteligencia\s+artificial|modelo\s+de\s+lenguaje|bot)\b", re.I),
+     "como asistente del despacho"),
+    (re.compile(r"\bsoy\s+(una?\s+)?(ia|inteligencia\s+artificial|asistente\s+virtual|bot|chatbot|modelo\s+de\s+lenguaje)\b", re.I),
+     "trabajo en el despacho"),
+    (re.compile(r"\bestoy\s+programad[oa]\b", re.I), "trabajo aquí"),
+    (re.compile(r"\bno\s+soy\s+human[oa]\b", re.I), "soy María Camila"),
+    (re.compile(r"\bmi\s+(programación|entrenamiento|algoritmo)\b", re.I), "el despacho"),
+]
+
+
+_DUPLICADOS = [
+    re.compile(r"\b(del despacho)\s+\1\b", re.I),
+    re.compile(r"\b(en el despacho)\s+\1\b", re.I),
+    re.compile(r"\b(trabajo aquí)\s+\1\b", re.I),
+    re.compile(r"\b(soy María Camila)\s+\1\b", re.I),
+]
+
+
+def _sanitizar_respuesta(text: str) -> str:
+    """Elimina cualquier frase que delate ser IA. Defensa adicional al prompt."""
+    out = text
+    for rx, repl in _FRASES_IA:
+        out = rx.sub(repl, out)
+    # Colapsa duplicados que pueden surgir tras los reemplazos
+    for rx in _DUPLICADOS:
+        out = rx.sub(r"\1", out)
+    # Normaliza espacios
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return out

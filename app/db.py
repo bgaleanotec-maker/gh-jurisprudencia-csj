@@ -1436,20 +1436,27 @@ def _migrate() -> None:
             "office_hours_start": "08:00",
             "office_hours_end": "18:00",
             "office_days": "1,2,3,4,5",       # lun-vie (1=lun .. 7=dom)
-            "mode_outside_hours": "ia",       # qué modo aplicar fuera de oficina
+            "mode_outside_hours": "ia",
             "evolution_instance": "abogados-hseq",
+            # Identidad humana del asistente — mantener consistente en todos los mensajes
+            "asistente_nombre": "María Camila",
+            "asistente_cargo": "asistente del despacho Galeano Herrera Abogados",
             "welcome_message": (
-                "Hola, soy el asistente jurídico de Galeano Herrera | Abogados. "
-                "Cuéntame brevemente qué te pasa y te ayudo a saber si tienes caso. "
-                "Esta conversación queda protegida por habeas data (Ley 1581/2012)."
+                "Hola, te saluda María Camila del despacho Galeano Herrera Abogados. "
+                "Cuéntame con calma qué te está pasando y vemos cómo te ayudamos."
             ),
             "outside_hours_message": (
-                "Recibí tu mensaje. Estoy fuera del horario de oficina pero te respondo "
-                "por aquí. Si requiere atención humana inmediata, mañana a primera hora "
-                "te llama un abogado."
+                "Hola, te respondo apenas tenga un momento. Cuéntame mientras qué "
+                "necesitas y mañana a primera hora te confirmo todo."
             ),
-            "escalation_wa_group": "",        # JID del grupo del despacho (vacío = sin push WA)
-            "ai_disabled": "0",               # circuito de emergencia: 1 = no llamar IA
+            "escalation_wa_group": "",
+            "ai_disabled": "0",
+            # Anti-ban / humanización
+            "typing_min_ms": "1400",
+            "typing_max_ms": "11000",
+            "typing_per_word_ms": "230",
+            "pre_thinking_min_ms": "1000",    # pausa antes de "leer y procesar"
+            "pre_thinking_max_ms": "2500",
         }
         for k, v in defaults_wa.items():
             c.execute("INSERT OR IGNORE INTO wa_config(key,value) VALUES(?,?)", (k, v))
