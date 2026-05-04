@@ -25,9 +25,11 @@ from typing import Optional
 try:
     from app import db as db_mod
     from app import wa_mode
+    from app import wa_disponibilidad as wa_disp
 except ImportError:
-    import db as db_mod  # type: ignore
-    import wa_mode       # type: ignore
+    import db as db_mod         # type: ignore
+    import wa_mode              # type: ignore
+    import wa_disponibilidad as wa_disp  # type: ignore
 
 
 INTENCIONES = {
@@ -143,6 +145,19 @@ VERTICALES INTERNOS (úsalos en el campo 'datos.vertical' del JSON):
 - Costo: {cita_costo}
 - Horario disponible: {office_days_str} de {office_hours_start} a {office_hours_end} ({timezone})
 
+══════════════════════════════════ DISPONIBILIDAD REAL HOY ════════════════════════
+{disponibilidad_block}
+
+REGLA ABSOLUTA SOBRE CITAS:
+- NUNCA inventes fechas, horas u "ofrezco mañana en la mañana" sin tener slots reales arriba.
+- Si DISPONIBILIDAD REAL = "(sin abogado disponible)" o "(sin disponibilidad)":
+  → NO ofrezcas cita. En su lugar di: "déjame coordinar con un abogado y te confirmo
+    una hora en máximo X horas" — Y SETTEA escalar=true, razon_escalada="sin_disponibilidad".
+- Si HAY slots, ofrece SOLO 1 ó 2 de los slots de arriba, con la frase EXACTA del label_humano.
+- Cuando el cliente confirme una hora específica, devuelve transicion_estado="lead_agendado"
+  Y el campo "slot_iso_confirmado" con el ISO del slot que aceptó (copiado exactamente
+  de la lista de disponibilidad).
+
 ══════════════════════════════════ HISTORIAL ══════════════════════════════════
 {history_block}
 
@@ -184,10 +199,18 @@ Responde EXCLUSIVAMENTE con JSON válido (sin markdown, sin texto extra) con est
   "escalar": false,
   "razon_escalada": null,
   "transicion_estado": null,
-  "califica": true
+  "califica": true,
+  "slot_iso_confirmado": null
 }}
 
-Si modo='humano' o intención FUERA_DE_TEMA / QUEJA: usa respuestas=[].
+REGLAS ESPECIALES:
+- Si modo='humano' o intención FUERA_DE_TEMA / QUEJA: respuestas=[].
+- Si NO HAY DISPONIBILIDAD y la intención es AGENDAR: respuestas=["déjame coordinar con un
+  abogado y te confirmo en un rato"], escalar=true, razon_escalada="sin_disponibilidad".
+- Si el cliente CONFIRMA una hora de la lista de disponibilidad: copia el ISO EXACTO
+  de esa lista en "slot_iso_confirmado", pon transicion_estado="lead_agendado", y en
+  "respuestas" pon SOLO algo tipo ["Listo, te confirmo en un momento."] — NO menciones
+  el nombre del abogado todavía (el sistema lo confirmará después).
 """
 
 
@@ -239,8 +262,9 @@ _TONO_DESCRIPTORES = {
 
 
 def _build_prompt(conv: dict, modo: str, datos_actuales: dict,
-                  history_block: str, text: str, cfg: dict) -> str:
-    """Construye el prompt usando los valores actuales de wa_config."""
+                  history_block: str, text: str, cfg: dict,
+                  slots_disponibles: Optional[list[dict]] = None) -> str:
+    """Construye el prompt usando los valores actuales de wa_config + slots reales."""
     nombre = cfg.get("asistente_nombre", "María Camila")
     cargo = cfg.get("asistente_cargo", "asistente del despacho")
     genero = (cfg.get("asistente_genero", "femenino") or "femenino").lower()
@@ -254,6 +278,19 @@ def _build_prompt(conv: dict, modo: str, datos_actuales: dict,
         genero_a, articulo_indef = "o", "un "
     else:
         genero_a, articulo_indef = "x", ""
+
+    # Construir bloque de disponibilidad real
+    if slots_disponibles is None:
+        disponibilidad_block = "(no consultada)"
+    elif not slots_disponibles:
+        disponibilidad_block = "(sin abogado disponible — NO ofrezcas cita ahora)"
+    else:
+        lines = []
+        for s in slots_disponibles[:4]:
+            iso = s.get("start", "")
+            label = s.get("label_humano", iso)
+            lines.append(f'- {label}  | iso="{iso}"')
+        disponibilidad_block = "\n".join(lines)
 
     return PROMPT_TEMPLATE.format(
         asistente_nombre=nombre,
@@ -274,6 +311,7 @@ def _build_prompt(conv: dict, modo: str, datos_actuales: dict,
         office_hours_start=cfg.get("office_hours_start", "08:00"),
         office_hours_end=cfg.get("office_hours_end", "18:00"),
         timezone=cfg.get("timezone", "America/Bogota"),
+        disponibilidad_block=disponibilidad_block,
         history_block=history_block,
         text=text[:1000],
     )
@@ -485,7 +523,19 @@ def procesar_mensaje_entrante(
         }
 
     datos_actuales = conv.get("datos_capturados") or {}
-    prompt = _build_prompt(conv, modo, datos_actuales, history_block, text or "", cfg)
+
+    # Consultar disponibilidad real ANTES de llamar a Gemini.
+    # Sólo nos interesa si el lead está calificándose o quiere agendar.
+    slots_real: list[dict] = []
+    try:
+        area_focus = datos_actuales.get("vertical")
+        # Si aún no hay vertical claro, traemos slots generales
+        slots_real = wa_disp.slots_proximos(area=area_focus, dias=14, max_slots=4)
+    except Exception as e:
+        print(f"[wa_brain] error obteniendo disponibilidad: {e}")
+
+    prompt = _build_prompt(conv, modo, datos_actuales, history_block, text or "", cfg,
+                           slots_disponibles=slots_real)
 
     out = _llamar_gemini_json(prompt, max_tokens=800)
     if not out:
@@ -536,6 +586,15 @@ def procesar_mensaje_entrante(
     if modo == "humano":
         respuestas = []  # silencio total en modo humano
 
+    # slot_iso_confirmado: validar que esté en la lista de disponibilidad real
+    slot_iso = out.get("slot_iso_confirmado")
+    if slot_iso:
+        slot_isos_validos = {s.get("start") for s in (slots_real or [])}
+        if slot_iso not in slot_isos_validos:
+            # Gemini se inventó un ISO, lo descartamos
+            print(f"[wa_brain] slot_iso_confirmado inválido (no en lista real): {slot_iso}")
+            slot_iso = None
+
     return {
         "intencion": intencion,
         "datos_extraidos": datos,
@@ -544,6 +603,7 @@ def procesar_mensaje_entrante(
         "escalar": bool(out.get("escalar")),
         "razon_escalada": out.get("razon_escalada"),
         "transicion_estado": transicion,
+        "slot_iso_confirmado": slot_iso,
         "usado_fallback": False,
     }
 

@@ -54,10 +54,12 @@ try:
     from app import db as db_mod
     from app import wa_brain
     from app import wa_mode
+    from app import wa_disponibilidad as wa_disp
 except ImportError:
     import db as db_mod  # type: ignore
     import wa_brain      # type: ignore
     import wa_mode       # type: ignore
+    import wa_disponibilidad as wa_disp  # type: ignore
 
 
 router = APIRouter(prefix="/wa", tags=["whatsapp"])
@@ -424,6 +426,62 @@ def _procesar_locked(payload: dict, msg: dict) -> None:
             log.info("ESCALADO razon=%s", decision.get("razon_escalada") or decision.get("modo_aplicado"))
         except Exception as e:
             log.error("escalate falló: %s", e)
+
+    # 9.5) Si Gemini detectó slot confirmado, intentar agendar REAL antes de enviar
+    slot_iso = decision.get("slot_iso_confirmado")
+    if slot_iso:
+        log.info("AGENDAR slot=%s area=%s", slot_iso, (conv.get("datos_capturados") or {}).get("vertical"))
+        try:
+            r = wa_disp.agendar_slot(
+                phone=phone,
+                slot_iso=slot_iso,
+                area=(conv.get("datos_capturados") or {}).get("vertical"),
+                lead_id=conv.get("lead_id"),
+                conv_id=conv["id"],
+            )
+        except Exception as e:
+            log.exception("agendar_slot crash: %s", e)
+            r = {"ok": False, "error": str(e)}
+
+        if r.get("ok"):
+            log.info("CITA-OK appt=%s lawyer=%s fecha=%s",
+                     r.get("appointment_id"), r.get("lawyer_name"), r.get("fecha_humana"))
+            # Reemplazar la respuesta por confirmación REAL
+            cfg = db_mod.wa_config_get_all()
+            asistente_nombre = cfg.get("asistente_nombre", "el asistente")
+            decision["respuestas"] = [
+                f"Listo, te confirmo. Te atiende {r['lawyer_name']} el {r['fecha_humana']}.",
+                f"Te enviaremos un recordatorio el día antes. Si necesitas reagendar, escríbeme.",
+            ]
+            # Guardar appointment_id en datos
+            try:
+                db_mod.wa_conv_update(conv["id"], datos_capturados={
+                    "appointment_id": r["appointment_id"],
+                    "lawyer_asignado": r["lawyer_name"],
+                    "fecha_cita_humana": r["fecha_humana"],
+                })
+            except Exception:
+                pass
+        else:
+            log.warning("CITA-FAIL razon=%s", r.get("error"))
+            # Caer back a "te confirmo en un momento" + escalar
+            decision["respuestas"] = [
+                "Voy a confirmar la disponibilidad con un abogado y te aviso en un momento.",
+            ]
+            try:
+                db_mod.wa_escalate(
+                    conversation_id=conv["id"],
+                    reason=f"agendar_fallo:{r.get('error','?')}",
+                )
+            except Exception:
+                pass
+            # Revertir transición de estado: NO está agendado realmente
+            if decision.get("transicion_estado") == "lead_agendado":
+                decision["transicion_estado"] = None
+                try:
+                    db_mod.wa_conv_update(conv["id"], estado="lead_calificado")
+                except Exception:
+                    pass
 
     # 10) Enviar respuesta(s) — OPTIMISTA: persistir antes de enviar
     segs = decision.get("respuestas") or []
