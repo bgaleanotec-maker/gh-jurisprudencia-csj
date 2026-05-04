@@ -281,9 +281,9 @@ def _build_prompt(conv: dict, modo: str, datos_actuales: dict,
 
 def _format_history(msgs: list[dict]) -> str:
     if not msgs:
-        return "(conversación nueva)"
+        return "(conversación nueva — primer contacto)"
     lines = []
-    for m in msgs[-12:]:  # cap a 12 últimos
+    for m in msgs[-22:]:
         who = "Cliente" if m.get("direction") == "in" else "Asistente"
         text = (m.get("text") or "").strip()
         if not text and m.get("kind") in ("image", "document", "audio", "video"):
@@ -468,7 +468,7 @@ def procesar_mensaje_entrante(
             "usado_fallback": True,
         }
 
-    history = db_mod.wa_msg_history(conv["id"], limit=14)
+    history = db_mod.wa_msg_history(conv["id"], limit=24)
     history_block = _format_history(history[:-1] if history else [])
 
     if ia_off:

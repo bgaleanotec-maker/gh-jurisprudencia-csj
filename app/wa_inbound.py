@@ -16,14 +16,37 @@ Filosofía:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 import threading
 import time
 import urllib.parse
 import urllib.request
+from collections import defaultdict
 from datetime import datetime
 from typing import Any, Optional
+
+# Logger con prefijo claro para trazar el pipeline en Render
+log = logging.getLogger("wa")
+if not log.handlers:
+    h = logging.StreamHandler()
+    h.setFormatter(logging.Formatter("[wa %(levelname)s %(asctime)s] %(message)s",
+                                     datefmt="%H:%M:%S"))
+    log.addHandler(h)
+    log.setLevel(logging.INFO)
+
+
+# ── Lock por phone para serializar mensajes consecutivos del mismo cliente ──
+# Cuando un cliente manda 3 mensajes seguidos, evita que 3 threads concurrentes
+# pisen la BD y se generen respuestas duplicadas/desordenadas.
+_PHONE_LOCKS: dict[str, threading.Lock] = defaultdict(threading.Lock)
+_PHONE_LOCKS_GUARD = threading.Lock()
+
+
+def _get_phone_lock(phone: str) -> threading.Lock:
+    with _PHONE_LOCKS_GUARD:
+        return _PHONE_LOCKS[phone]
 
 from fastapi import APIRouter, Request, HTTPException
 
@@ -244,33 +267,80 @@ def _extract_message(payload: dict) -> Optional[dict]:
 # ── Procesamiento (en background) ────────────────────────────────────────────
 
 def _procesar_async(payload: dict) -> None:
-    """Corre en thread separado: clasifica con IA y responde como humano."""
+    """Corre en thread separado: clasifica con IA y responde como humano.
+
+    Garantías:
+    - Serializado por phone (lock): mensajes consecutivos del mismo cliente
+      se procesan en orden, no en paralelo.
+    - Cada paso loggea y captura excepciones por separado.
+    - Outbound se persiste en BD ANTES de mandarlo a Evolution (optimista),
+      para que el contexto exista incluso si el envío falla o el thread crashea.
+    """
+    msg = None
     try:
         msg = _extract_message(payload)
-        if not msg:
-            return  # evento no procesable
+    except Exception as e:
+        log.error("extract_message falló: %s | payload=%s", e, str(payload)[:300])
+        return
+    if not msg:
+        log.info("evento ignorado (no es msg procesable): event=%s",
+                 (payload.get("event") or "?"))
+        return
 
-        # Idempotencia
-        if msg["evolution_message_id"] and db_mod.wa_msg_exists(msg["evolution_message_id"]):
+    phone = msg["phone"]
+    evo_id = msg.get("evolution_message_id") or ""
+    log.info("INBOUND phone=%s id=%s kind=%s text=%r",
+             phone, evo_id[:20], msg["kind"], (msg["text"] or "")[:80])
+
+    # Idempotencia rápida fuera del lock (dedup por ID)
+    try:
+        if evo_id and db_mod.wa_msg_exists(evo_id):
+            log.info("DEDUP id=%s ya existía, salgo", evo_id[:20])
             return
+    except Exception as e:
+        log.error("wa_msg_exists falló: %s", e)
 
-        # Conversación (crear si no existe)
-        conv = db_mod.wa_conv_get_or_create(msg["phone"])
+    # ─── Lock por phone ─── serializa procesamiento del mismo cliente
+    with _get_phone_lock(phone):
+        try:
+            _procesar_locked(payload, msg)
+        except Exception as e:
+            log.exception("error procesando phone=%s: %s", phone, e)
 
-        # Capturar push_name si no tenemos nombre aún
-        push_name = (msg.get("push_name") or "").strip()
-        datos_actuales = conv.get("datos_capturados") or {}
-        if push_name and not datos_actuales.get("nombre"):
-            db_mod.wa_conv_update(
-                conv["id"],
-                datos_capturados={"nombre_wa": push_name},
-            )
 
-        # Persistir mensaje entrante
+def _procesar_locked(payload: dict, msg: dict) -> None:
+    """Cuerpo del procesamiento — corre con el lock del phone tomado."""
+    phone = msg["phone"]
+    evo_id = msg.get("evolution_message_id") or ""
+
+    # Re-check idempotencia DENTRO del lock (otro thread pudo haberlo guardado)
+    if evo_id and db_mod.wa_msg_exists(evo_id):
+        log.info("DEDUP-IN-LOCK id=%s, salgo", evo_id[:20])
+        return
+
+    # 1) Conv
+    try:
+        conv = db_mod.wa_conv_get_or_create(phone)
+    except Exception as e:
+        log.error("wa_conv_get_or_create falló: %s", e)
+        return
+
+    # 2) Capturar push_name
+    push_name = (msg.get("push_name") or "").strip()
+    datos_actuales = conv.get("datos_capturados") or {}
+    if push_name and not datos_actuales.get("nombre") and not datos_actuales.get("nombre_wa"):
+        try:
+            db_mod.wa_conv_update(conv["id"], datos_capturados={"nombre_wa": push_name})
+            log.info("push_name capturado: %s", push_name)
+        except Exception as e:
+            log.error("update push_name falló: %s", e)
+
+    # 3) Persistir entrante
+    try:
         msg_id_db = db_mod.wa_msg_save(
-            evolution_message_id=msg["evolution_message_id"],
+            evolution_message_id=evo_id or None,
             conversation_id=conv["id"],
-            phone=msg["phone"],
+            phone=phone,
             direction="in",
             kind=msg["kind"],
             text=msg["text"],
@@ -280,88 +350,130 @@ def _procesar_async(payload: dict) -> None:
             raw_event=payload,
             ts=msg["ts"],
         )
-        if msg_id_db is None:
-            return  # duplicado
-
+    except Exception as e:
+        log.exception("wa_msg_save IN falló: %s", e)
+        return
+    if msg_id_db is None:
+        log.info("INBOUND duplicado al guardar, salgo")
+        return
+    try:
         db_mod.wa_conv_inc_msg_count(conv["id"])
+    except Exception as e:
+        log.error("inc_msg_count falló: %s", e)
 
-        # Marcar mensaje como leído (doble check azul) — naturalidad humana
-        try:
-            remote_jid = (payload.get("data") or {}).get("key", {}).get("remoteJid", "")
-            if remote_jid and msg["evolution_message_id"]:
-                marcar_leido(remote_jid, msg["evolution_message_id"])
-        except Exception:
-            pass
+    # 4) Marcar leído (best-effort)
+    try:
+        remote_jid = (payload.get("data") or {}).get("key", {}).get("remoteJid", "")
+        if remote_jid and evo_id:
+            marcar_leido(remote_jid, evo_id)
+    except Exception as e:
+        log.warning("marcar_leido falló (no crítico): %s", e)
 
-        # Pequeña pausa antes de "leer y procesar" (humano: ve el mensaje, piensa)
-        time.sleep(1.0 + random.random() * 1.5)  # 1.0-2.5s
+    # 5) Pausa pre-pensar
+    time.sleep(1.0 + random.random() * 1.5)
 
-        # Releer la conversación con datos_capturados frescos
-        conv = db_mod.wa_conv_get_by_phone(msg["phone"]) or conv
+    # 6) Releer conv con datos frescos
+    try:
+        conv = db_mod.wa_conv_get_by_phone(phone) or conv
+    except Exception as e:
+        log.error("wa_conv_get_by_phone falló: %s", e)
 
-        # Orquestar (Gemini decide qué responder y cómo)
+    # 7) Brain (puede tardar 3-7s con Gemini)
+    log.info("BRAIN-IN conv=%s estado=%s datos=%s",
+             conv["id"], conv["estado"], list((conv.get("datos_capturados") or {}).keys()))
+    try:
         decision = wa_brain.procesar_mensaje_entrante(
             conv, msg_id_db, msg["text"] or "", kind=msg["kind"]
         )
+    except Exception as e:
+        log.exception("brain falló: %s", e)
+        return
+    log.info("BRAIN-OUT intencion=%s modo=%s segs=%d transicion=%s escalar=%s fb=%s",
+             decision.get("intencion"), decision.get("modo_aplicado"),
+             len(decision.get("respuestas") or []),
+             decision.get("transicion_estado"), decision.get("escalar"),
+             decision.get("usado_fallback"))
 
-        # Actualizar datos capturados + intención + transición
-        updates: dict[str, Any] = {}
-        if decision.get("datos_extraidos"):
-            updates["datos_capturados"] = decision["datos_extraidos"]
-        if decision.get("intencion"):
-            updates["ultima_intencion"] = decision["intencion"]
-        if decision.get("transicion_estado"):
-            updates["estado"] = decision["transicion_estado"]
-        if updates:
+    # 8) Actualizar datos / intención / transición
+    updates: dict[str, Any] = {}
+    if decision.get("datos_extraidos"):
+        updates["datos_capturados"] = decision["datos_extraidos"]
+    if decision.get("intencion"):
+        updates["ultima_intencion"] = decision["intencion"]
+    if decision.get("transicion_estado"):
+        updates["estado"] = decision["transicion_estado"]
+    if updates:
+        try:
             db_mod.wa_conv_update(conv["id"], **updates)
+        except Exception as e:
+            log.error("wa_conv_update falló: %s", e)
 
+    try:
         db_mod.wa_msg_set_ai(msg_id_db, decision.get("intencion") or "INSEGURO")
+    except Exception:
+        pass
 
-        # Escalar si la IA lo pide o modo=humano
-        if decision.get("escalar") or decision.get("modo_aplicado") == "humano":
+    # 9) Escalar si aplica
+    if decision.get("escalar") or decision.get("modo_aplicado") == "humano":
+        try:
             db_mod.wa_escalate(
                 conversation_id=conv["id"],
                 lawyer_id=conv.get("assigned_lawyer_id"),
                 reason=decision.get("razon_escalada") or decision.get("modo_aplicado"),
             )
+            log.info("ESCALADO razon=%s", decision.get("razon_escalada") or decision.get("modo_aplicado"))
+        except Exception as e:
+            log.error("escalate falló: %s", e)
 
-        # Enviar respuesta(s)
-        # wa_brain devuelve `respuesta` (str) o `respuestas` (list[str] = segmentos cortos)
-        segs = decision.get("respuestas") or []
-        if not segs and decision.get("respuesta"):
-            segs = [decision["respuesta"]]
+    # 10) Enviar respuesta(s) — OPTIMISTA: persistir antes de enviar
+    segs = decision.get("respuestas") or []
+    if not segs and decision.get("respuesta"):
+        segs = [decision["respuesta"]]
+    if not segs:
+        log.info("SIN-RESPUESTA (modo=%s)", decision.get("modo_aplicado"))
+        return
 
-        if segs:
-            results = enviar_segmentos(msg["phone"], segs)
-            for i, (seg, res) in enumerate(zip(segs, results)):
-                if not res.get("ok"):
-                    print(f"[wa_inbound] error enviando seg {i}: {res.get('error')}")
-                    continue
-                evo_resp_id = None
-                try:
-                    parsed = json.loads(res.get("response") or "{}")
-                    evo_resp_id = (parsed.get("key") or {}).get("id")
-                except Exception:
-                    pass
-                db_mod.wa_msg_save(
-                    evolution_message_id=evo_resp_id,
-                    conversation_id=conv["id"],
-                    phone=msg["phone"],
-                    direction="out",
-                    kind="text",
-                    text=seg,
-                    raw_event={"sent_via": "evolution", "segment": i},
-                    ts=datetime.now().isoformat(timespec="seconds"),
-                )
-            db_mod.wa_conv_update(
-                conv["id"],
-                ultima_respuesta_at=datetime.now().isoformat(timespec="seconds"),
+    log.info("ENVIANDO %d segmento(s) a %s", len(segs), phone)
+    for i, seg in enumerate(segs):
+        seg = (seg or "").strip()
+        if not seg:
+            continue
+        # 10a) Persistir OUTBOUND ANTES de enviar (contexto garantizado)
+        out_msg_id = None
+        try:
+            out_msg_id = db_mod.wa_msg_save(
+                evolution_message_id=None,  # se actualizaría después si quisiéramos
+                conversation_id=conv["id"],
+                phone=phone,
+                direction="out",
+                kind="text",
+                text=seg,
+                raw_event={"sent_via": "evolution", "segment": i, "pending_send": True},
+                ts=datetime.now().isoformat(timespec="seconds"),
             )
+        except Exception as e:
+            log.error("wa_msg_save OUT (preview) falló seg %d: %s", i, e)
 
+        # 10b) Pausa entre segmentos consecutivos (no antes del primero)
+        if i > 0:
+            time.sleep(0.6 + random.random() * 1.0)
+
+        # 10c) Enviar via Evolution con typing humano
+        res = enviar_texto(phone, seg, humanizar=True)
+        if res.get("ok"):
+            log.info("OUT seg %d/%d enviado OK", i + 1, len(segs))
+        else:
+            log.error("OUT seg %d/%d FALLÓ: %s", i + 1, len(segs), res.get("error"))
+
+    # 11) Marcar timestamp de última respuesta
+    try:
+        db_mod.wa_conv_update(
+            conv["id"],
+            ultima_respuesta_at=datetime.now().isoformat(timespec="seconds"),
+        )
     except Exception as e:
-        print(f"[wa_inbound] error procesando webhook: {e}")
-        import traceback
-        traceback.print_exc()
+        log.error("update ultima_respuesta_at falló: %s", e)
+    log.info("DONE phone=%s", phone)
 
 
 # ── Endpoints HTTP ───────────────────────────────────────────────────────────
