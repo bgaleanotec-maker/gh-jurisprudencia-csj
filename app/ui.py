@@ -4046,3 +4046,449 @@ loadStats(); loadLeads();
 setInterval(loadStats, 60000);
 </script>
 </body></html>"""
+
+
+
+# ---------------------------------------------------------------------------
+# ADMIN - Modulo de configuracion WhatsApp (Maria Camila)
+# ---------------------------------------------------------------------------
+
+def admin_wa_html() -> str:
+    return _ADMIN_WA_HTML
+
+
+_ADMIN_WA_HTML = """<!doctype html>
+<html lang="es"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WhatsApp - Configuracion - Galeano Herrera</title>
+<style>
+  :root { --acento:#C5A059; --texto:#1c1c1c; --gris:#666; --bg:#f6f6f4;
+          --borde:#e1e1d8; --ok:#1f8a4c; --warn:#c8102e; }
+  * { box-sizing:border-box; margin:0; padding:0 }
+  body { font:15px/1.5 system-ui,-apple-system,sans-serif; color:var(--texto); background:var(--bg); }
+  header { background:#fff; padding:18px 28px; border-bottom:2px solid var(--acento);
+           display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:20px; color:var(--acento); }
+  header nav a { color:var(--gris); text-decoration:none; margin-left:18px; font-size:14px }
+  header nav a:hover { color:var(--acento) }
+  main { max-width:1200px; margin:0 auto; padding:28px; }
+  .tabs { display:flex; gap:2px; background:#fff; border-radius:12px 12px 0 0;
+          padding:6px 6px 0; border:1px solid var(--borde); border-bottom:none; flex-wrap:wrap; }
+  .tab { flex:1; padding:14px 12px; background:transparent; border:none; cursor:pointer;
+         font-weight:600; color:var(--gris); border-radius:8px 8px 0 0; transition:.15s; font-size:13px; min-width:120px; }
+  .tab.active { background:var(--acento); color:#fff; }
+  .tab:not(.active):hover { background:#f2f2ed; color:var(--texto); }
+  .panel { background:#fff; padding:32px; border-radius:0 0 12px 12px;
+           border:1px solid var(--borde); border-top:none; min-height:400px; }
+  .panel section { margin-bottom:32px; padding-bottom:24px; border-bottom:1px dashed var(--borde); }
+  .panel section:last-child { border-bottom:none; padding-bottom:0; margin-bottom:0; }
+  h2 { font-size:18px; color:var(--acento); margin-bottom:8px; }
+  .desc { color:var(--gris); font-size:13px; margin-bottom:16px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
+  @media (max-width:760px) { .grid2,.grid3 { grid-template-columns:1fr } }
+  label { display:block; font-size:13px; font-weight:600; color:#333; margin-bottom:6px; }
+  label small { font-weight:400; color:var(--gris); }
+  input[type=text], input[type=time], input[type=number], select, textarea {
+    width:100%; padding:10px 12px; border:1px solid var(--borde); border-radius:8px;
+    font-size:14px; font-family:inherit; background:#fff;
+  }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--acento);
+    box-shadow:0 0 0 3px rgba(197,160,89,.2); }
+  textarea { resize:vertical; min-height:80px; }
+  .row-checkboxes { display:flex; flex-wrap:wrap; gap:12px; }
+  .row-checkboxes label { display:inline-flex; align-items:center; gap:6px; font-weight:400; }
+  .actions { display:flex; gap:12px; align-items:center; margin-top:24px; padding-top:24px;
+             border-top:2px solid var(--acento); }
+  button.primary { background:var(--acento); color:#fff; border:none; padding:11px 26px;
+                   border-radius:8px; cursor:pointer; font-weight:600; font-size:14px; }
+  button.primary:hover { opacity:.9; }
+  button.danger { background:var(--warn); color:#fff; border:none; padding:8px 14px;
+                  border-radius:6px; cursor:pointer; font-size:13px; }
+  .toast { position:fixed; bottom:24px; right:24px; padding:14px 24px; border-radius:8px;
+           color:#fff; font-weight:600; font-size:14px; opacity:0; transition:.3s; z-index:1000; }
+  .toast.show { opacity:1; }
+  .toast.ok { background:var(--ok); }
+  .toast.err { background:var(--warn); }
+  .servicios-list { display:flex; flex-direction:column; gap:8px; }
+  .servicio-item { display:grid; grid-template-columns:1fr 2fr auto; gap:8px;
+                   align-items:center; padding:10px; background:#fafaf7;
+                   border:1px solid var(--borde); border-radius:6px; }
+  .servicio-item input { padding:7px 10px; font-size:13px; }
+  .add-svc { padding:8px 16px; border:1px dashed var(--acento); background:transparent;
+             color:var(--acento); border-radius:6px; cursor:pointer; font-weight:600; font-size:13px; }
+  .conv-row { display:grid; grid-template-columns:1fr 1.5fr 1fr 0.7fr 1fr 0.6fr;
+              gap:12px; padding:12px; border-bottom:1px solid var(--borde);
+              align-items:center; font-size:13px; }
+  .conv-row.header { font-weight:700; color:var(--gris); background:#fafaf7; }
+  .badge { display:inline-block; padding:3px 10px; border-radius:12px; font-size:11px; font-weight:700; }
+  .b-nuevo { background:#e8f0fe; color:#1967d2 }
+  .b-calif { background:#fef7e0; color:#a87b14 }
+  .b-agend { background:#e6f4ea; color:#188038 }
+  .b-cli   { background:#fce8e6; color:#c5221f }
+  .b-arch  { background:#f1f3f4; color:#5f6368 }
+  .law-card { background:#fafaf7; border:1px solid var(--borde); border-radius:10px;
+              padding:18px; margin-bottom:14px; }
+  .law-card h3 { font-size:15px; margin-bottom:8px; color:var(--texto) }
+  .sched-table { width:100%; border-collapse:collapse; margin-top:8px; font-size:13px; }
+  .sched-table th, .sched-table td { padding:6px 10px; border:1px solid var(--borde); text-align:center; }
+  .sched-table th { background:#f2f2ed; }
+  .health-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:12px; }
+  .health-pill { padding:10px 14px; background:#fafaf7; border:1px solid var(--borde);
+                 border-radius:8px; font-size:13px; }
+  .health-pill .lbl { color:var(--gris); font-size:11px; text-transform:uppercase; letter-spacing:.5px; }
+  .health-pill .val { font-weight:700; font-size:15px; }
+  .health-pill.ok .val { color:var(--ok); }
+  .health-pill.err .val { color:var(--warn); }
+</style>
+</head><body>
+
+<header>
+  <h1>WhatsApp - Configuracion del asistente</h1>
+  <nav>
+    <a href="/admin">Admin</a>
+    <a href="/wa/health" target="_blank">Health</a>
+    <a href="/" target="_blank">Sitio</a>
+  </nav>
+</header>
+
+<main>
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="identidad">Identidad</button>
+    <button class="tab" data-tab="modo">Modo y horario</button>
+    <button class="tab" data-tab="mensajes">Mensajes</button>
+    <button class="tab" data-tab="servicios">Servicios</button>
+    <button class="tab" data-tab="cita">Politica de cita</button>
+    <button class="tab" data-tab="anti-ban">Anti-ban</button>
+    <button class="tab" data-tab="conversaciones">Conversaciones</button>
+    <button class="tab" data-tab="agendas">Agendas</button>
+  </div>
+
+  <div class="panel" id="panel-identidad">
+    <section>
+      <h2>Quien atiende el WhatsApp</h2>
+      <p class="desc">Esta identidad se usa en cada mensaje. Cambiala y la IA responde con la nueva persona en el siguiente turno (sin redeploy).</p>
+      <div class="grid2">
+        <div><label>Nombre del asistente</label><input id="asistente_nombre" type="text" placeholder="Maria Camila"></div>
+        <div><label>Cargo / rol</label><input id="asistente_cargo" type="text" placeholder="asistente del despacho..."></div>
+        <div><label>Genero gramatical <small>(para concordancia)</small></label>
+          <select id="asistente_genero">
+            <option value="femenino">Femenino (calida, atenta)</option>
+            <option value="masculino">Masculino (calido, atento)</option>
+            <option value="neutro">Neutro</option>
+          </select>
+        </div>
+        <div><label>Tono</label>
+          <select id="tono">
+            <option value="cercano">Cercano (paciente, calido)</option>
+            <option value="formal">Formal (profesional, respetuoso)</option>
+            <option value="tecnico">Tecnico (preciso, juridico)</option>
+          </select>
+        </div>
+        <div><label>Nombre del despacho</label><input id="despacho_nombre" type="text"></div>
+        <div><label>Ciudad principal</label><input id="ciudad_principal" type="text"></div>
+      </div>
+    </section>
+    <div class="actions"><button class="primary" onclick="guardar('identidad')">Guardar identidad</button></div>
+  </div>
+
+  <div class="panel" id="panel-modo" style="display:none">
+    <section>
+      <h2>Modo de atencion global</h2>
+      <p class="desc">Hibrido = la IA atiende a leads nuevos, y cuando se vuelven clientes activos pasa a humano automaticamente.</p>
+      <div class="grid3">
+        <div><label>Modo global</label>
+          <select id="mode_global">
+            <option value="hibrido">Hibrido (recomendado)</option>
+            <option value="ia">Solo IA (Maria atiende todo)</option>
+            <option value="humano">Solo humano (la IA no responde)</option>
+          </select>
+        </div>
+        <div><label>Fuera de horario</label>
+          <select id="mode_outside_hours">
+            <option value="ia">IA responde igual</option>
+            <option value="humano">Silencio (humano al dia siguiente)</option>
+          </select>
+        </div>
+        <div><label>Circuito de emergencia</label>
+          <select id="ai_disabled">
+            <option value="0">IA activa</option>
+            <option value="1">IA APAGADA (todo a humano)</option>
+          </select>
+        </div>
+      </div>
+    </section>
+    <section>
+      <h2>Horario de atencion</h2>
+      <p class="desc">Dias y horas en que Maria Camila responde activamente.</p>
+      <div class="grid3">
+        <div><label>Hora inicio</label><input id="office_hours_start" type="time"></div>
+        <div><label>Hora fin</label><input id="office_hours_end" type="time"></div>
+        <div><label>Zona horaria</label><input id="timezone" type="text"></div>
+      </div>
+      <div style="margin-top:16px">
+        <label>Dias disponibles</label>
+        <div class="row-checkboxes" id="office_days_chk">
+          <label><input type="checkbox" value="1">Lunes</label>
+          <label><input type="checkbox" value="2">Martes</label>
+          <label><input type="checkbox" value="3">Miercoles</label>
+          <label><input type="checkbox" value="4">Jueves</label>
+          <label><input type="checkbox" value="5">Viernes</label>
+          <label><input type="checkbox" value="6">Sabado</label>
+          <label><input type="checkbox" value="7">Domingo</label>
+        </div>
+      </div>
+    </section>
+    <section>
+      <h2>Notificacion al equipo (opcional)</h2>
+      <div>
+        <label>JID grupo despacho en WhatsApp <small>(formato 12036...@g.us, vacio = sin push)</small></label>
+        <input id="escalation_wa_group" type="text" placeholder="120363xxxxxx@g.us">
+      </div>
+    </section>
+    <div class="actions"><button class="primary" onclick="guardar('modo')">Guardar modo y horario</button></div>
+  </div>
+
+  <div class="panel" id="panel-mensajes" style="display:none">
+    <section>
+      <h2>Mensajes plantilla</h2>
+      <p class="desc">Texto que Maria Camila usa en momentos clave. Editas y se aplican al siguiente mensaje.</p>
+      <div><label>Mensaje de bienvenida</label><textarea id="welcome_message" rows="3"></textarea></div>
+      <div style="margin-top:16px"><label>Mensaje fuera de horario</label><textarea id="outside_hours_message" rows="3"></textarea></div>
+      <div style="margin-top:16px"><label>Mensaje al escalar a abogado humano</label><textarea id="escalation_message" rows="2"></textarea></div>
+      <div style="margin-top:16px"><label>Mensaje de cierre tras agendar cita</label><textarea id="cierre_cita_message" rows="2"></textarea></div>
+    </section>
+    <div class="actions"><button class="primary" onclick="guardar('mensajes')">Guardar mensajes</button></div>
+  </div>
+
+  <div class="panel" id="panel-servicios" style="display:none">
+    <section>
+      <h2>Servicios que ofrece el despacho</h2>
+      <p class="desc">Lista que Maria Camila puede mencionar cuando un cliente pregunta "que hacen ustedes?".</p>
+      <div class="servicios-list" id="servicios_list"></div>
+      <button class="add-svc" onclick="addSvc()" style="margin-top:12px">+ Agregar servicio</button>
+    </section>
+    <div class="actions"><button class="primary" onclick="guardarServicios()">Guardar servicios</button></div>
+  </div>
+
+  <div class="panel" id="panel-cita" style="display:none">
+    <section>
+      <h2>Politica de cita</h2>
+      <p class="desc">Detalles que Maria Camila menciona cuando ofrece una cita.</p>
+      <div class="grid3">
+        <div><label>Duracion (minutos)</label><input id="cita_duracion_min" type="number" min="5" max="120"></div>
+        <div><label>Modalidad</label><input id="cita_modalidad" type="text" placeholder="llamada o videollamada"></div>
+        <div><label>Costo</label><input id="cita_costo" type="text" placeholder="gratuita la primera consulta"></div>
+      </div>
+    </section>
+    <div class="actions"><button class="primary" onclick="guardar('cita')">Guardar politica de cita</button></div>
+  </div>
+
+  <div class="panel" id="panel-anti-ban" style="display:none">
+    <section>
+      <h2>Humanizacion (anti-ban WhatsApp)</h2>
+      <p class="desc">Tiempos de "escribiendo..." y pausas que simulan tipeo humano. Los valores por defecto estan bien calibrados.</p>
+      <div class="grid3">
+        <div><label>Typing minimo (ms)</label><input id="typing_min_ms" type="number"></div>
+        <div><label>Typing maximo (ms)</label><input id="typing_max_ms" type="number"></div>
+        <div><label>ms por palabra</label><input id="typing_per_word_ms" type="number"></div>
+        <div><label>Pre-pensar minimo (ms)</label><input id="pre_thinking_min_ms" type="number"></div>
+        <div><label>Pre-pensar maximo (ms)</label><input id="pre_thinking_max_ms" type="number"></div>
+        <div><label>Max. mensajes por turno</label><input id="max_segmentos_por_turno" type="number" min="1" max="5"></div>
+      </div>
+    </section>
+    <div class="actions"><button class="primary" onclick="guardar('anti-ban')">Guardar humanizacion</button></div>
+  </div>
+
+  <div class="panel" id="panel-conversaciones" style="display:none">
+    <section>
+      <h2>Conversaciones recientes</h2>
+      <p class="desc">Ultimas conversaciones de WhatsApp gestionadas por Maria Camila.</p>
+      <div id="health_box" class="health-grid" style="margin-bottom:16px"></div>
+      <div id="convs_list">Cargando...</div>
+    </section>
+  </div>
+
+  <div class="panel" id="panel-agendas" style="display:none">
+    <section>
+      <h2>Agendas de los abogados</h2>
+      <p class="desc">Disponibilidad declarada por cada abogado del despacho.</p>
+      <div id="agendas_list">Cargando...</div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const TABS = ['identidad','modo','mensajes','servicios','cita','anti-ban','conversaciones','agendas'];
+let CFG = {};
+
+document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+
+function switchTab(t) {
+  TABS.forEach(x => { document.getElementById('panel-'+x).style.display = (x===t ? 'block' : 'none'); });
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.tab===t));
+  if (t === 'conversaciones') loadConversaciones();
+  if (t === 'agendas') loadAgendas();
+}
+
+function toast(msg, type) {
+  type = type || 'ok';
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show ' + type;
+  setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+async function loadConfig() {
+  const r = await fetch('/api/admin/wa/config');
+  if (!r.ok) { toast('Error cargando config', 'err'); return; }
+  CFG = (await r.json()).config;
+  ['asistente_nombre','asistente_cargo','asistente_genero','tono','despacho_nombre','ciudad_principal',
+   'mode_global','mode_outside_hours','ai_disabled','office_hours_start','office_hours_end','timezone','escalation_wa_group',
+   'welcome_message','outside_hours_message','escalation_message','cierre_cita_message',
+   'cita_duracion_min','cita_modalidad','cita_costo',
+   'typing_min_ms','typing_max_ms','typing_per_word_ms','pre_thinking_min_ms','pre_thinking_max_ms','max_segmentos_por_turno']
+   .forEach(k => { const el = document.getElementById(k); if (el) el.value = CFG[k] || ''; });
+  const days = (CFG.office_days || '').split(',').map(s=>s.trim()).filter(Boolean);
+  document.querySelectorAll('#office_days_chk input').forEach(c => { c.checked = days.includes(c.value); });
+  renderServicios(CFG.servicios || '');
+}
+
+function renderServicios(str) {
+  const cont = document.getElementById('servicios_list');
+  cont.innerHTML = '';
+  const items = str.split('|').map(s => s.trim()).filter(Boolean);
+  items.forEach(it => {
+    const parts = it.includes('::') ? it.split('::') : [it, ''];
+    addSvcRow(parts[0], parts[1] || '');
+  });
+  if (items.length === 0) addSvcRow('', '');
+}
+
+function addSvc() { addSvcRow('', ''); }
+
+function addSvcRow(titulo, desc) {
+  const cont = document.getElementById('servicios_list');
+  const row = document.createElement('div');
+  row.className = 'servicio-item';
+  row.innerHTML = '<input class="svc-t" type="text" placeholder="Titulo" value="'+escapeAttr(titulo)+'">'
+    + '<input class="svc-d" type="text" placeholder="Descripcion corta" value="'+escapeAttr(desc)+'">'
+    + '<button class="danger" onclick="this.parentElement.remove()">x</button>';
+  cont.appendChild(row);
+}
+
+function escapeAttr(s) { return String(s||'').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+const GROUPS = {
+  identidad: ['asistente_nombre','asistente_cargo','asistente_genero','tono','despacho_nombre','ciudad_principal'],
+  modo: ['mode_global','mode_outside_hours','ai_disabled','office_hours_start','office_hours_end','timezone','escalation_wa_group'],
+  mensajes: ['welcome_message','outside_hours_message','escalation_message','cierre_cita_message'],
+  cita: ['cita_duracion_min','cita_modalidad','cita_costo'],
+  'anti-ban': ['typing_min_ms','typing_max_ms','typing_per_word_ms','pre_thinking_min_ms','pre_thinking_max_ms','max_segmentos_por_turno'],
+};
+
+async function guardar(grupo) {
+  const items = {};
+  GROUPS[grupo].forEach(k => { const el = document.getElementById(k); if (el) items[k] = el.value; });
+  if (grupo === 'modo') {
+    const days = Array.from(document.querySelectorAll('#office_days_chk input:checked')).map(c => c.value).join(',');
+    items.office_days = days || '1,2,3,4,5';
+  }
+  const r = await fetch('/api/admin/wa/config', {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({items: items})
+  });
+  if (r.ok) { const d = await r.json(); toast('Guardado: ' + d.updated + ' campos'); }
+  else { const e = await r.text(); toast('Error: '+e.slice(0,80), 'err'); }
+}
+
+async function guardarServicios() {
+  const rows = document.querySelectorAll('.servicio-item');
+  const items = [];
+  rows.forEach(r => {
+    const t = r.querySelector('.svc-t').value.trim();
+    const d = r.querySelector('.svc-d').value.trim();
+    if (t) items.push(d ? (t+'::'+d) : t);
+  });
+  const r = await fetch('/api/admin/wa/config', {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({items: {servicios: items.join('|')}})
+  });
+  if (r.ok) toast('Guardado: ' + items.length + ' servicios');
+  else toast('Error guardando', 'err');
+}
+
+async function loadConversaciones() {
+  const h = await (await fetch('/wa/health')).json();
+  const hb = document.getElementById('health_box');
+  hb.innerHTML =
+    '<div class="health-pill ' + (h.gemini_key_present?'ok':'err') + '">' +
+    '<div class="lbl">Gemini</div><div class="val">' + (h.gemini_key_present?'Activo':'Falta') + '</div></div>' +
+    '<div class="health-pill ' + (h.evolution_key_present?'ok':'err') + '">' +
+    '<div class="lbl">Evolution</div><div class="val">' + (h.evolution_key_present?'Conectado':'Falta') + '</div></div>' +
+    '<div class="health-pill ok"><div class="lbl">Modo global</div><div class="val">' + h.mode_global + '</div></div>' +
+    '<div class="health-pill ' + (h.ai_disabled==='1'?'err':'ok') + '">' +
+    '<div class="lbl">IA</div><div class="val">' + (h.ai_disabled==='1'?'APAGADA':'Activa') + '</div></div>' +
+    '<div class="health-pill ok"><div class="lbl">Horario</div><div class="val">' + h.office_hours + '</div></div>';
+
+  const r = await fetch('/api/admin/wa/conversations?limit=80');
+  const d = await r.json();
+  const list = document.getElementById('convs_list');
+  if (!d.items.length) { list.innerHTML = '<p style="color:#666; padding:24px; text-align:center">Sin conversaciones aun</p>'; return; }
+  let html = '<div class="conv-row header"><div>Telefono</div><div>Datos capturados</div><div>Ultima intencion</div><div>Msgs</div><div>Estado</div><div>Modo</div></div>';
+  for (const c of d.items) {
+    const datos = c.datos_capturados || {};
+    const ds = Object.entries(datos).slice(0,3).map(kv => kv[0]+': '+String(kv[1]).slice(0,20)).join(', ') || '<em style="color:#999">vacio</em>';
+    const cls = c.estado.startsWith('lead_nuevo') ? 'b-nuevo' :
+                c.estado.startsWith('lead_calif') ? 'b-calif' :
+                c.estado.startsWith('lead_agend') ? 'b-agend' :
+                c.estado.startsWith('cliente') ? 'b-cli' : 'b-arch';
+    html += '<div class="conv-row">' +
+      '<div><strong>+' + c.phone + '</strong></div>' +
+      '<div style="font-size:12px">' + ds + '</div>' +
+      '<div style="font-size:12px">' + (c.ultima_intencion || '-') + '</div>' +
+      '<div>' + c.mensajes_count + '</div>' +
+      '<div><span class="badge ' + cls + '">' + c.estado + '</span></div>' +
+      '<div>' + c.modo + '</div></div>';
+  }
+  list.innerHTML = html;
+}
+
+async function loadAgendas() {
+  const list = document.getElementById('agendas_list');
+  const r = await fetch('/api/admin/lawyers/schedules');
+  const d = await r.json();
+  if (!d.items.length) { list.innerHTML = '<p style="color:#666">Sin abogados creados aun. Crea uno desde /admin.</p>'; return; }
+  let html = '';
+  for (const lw of d.items) {
+    html += '<div class="law-card">' +
+      '<h3>' + (lw.name || '(sin nombre)') + ' <small style="color:#888; font-weight:400">' +
+      (lw.email || '') + ' - ' + (lw.role || 'lawyer') + (lw.active ? '' : ' - INACTIVO') + '</small></h3>' +
+      '<div style="font-size:13px; color:#666">WhatsApp: +' + (lw.whatsapp || '-') +
+      ' - Areas: ' + ((lw.areas || []).join(', ') || '-') + '</div>';
+    if (lw.schedule) {
+      html += '<table class="sched-table"><tr><th>Lun</th><th>Mar</th><th>Mie</th><th>Jue</th><th>Vie</th><th>Sab</th><th>Dom</th></tr><tr>';
+      for (const d2 of [1,2,3,4,5,6,7]) {
+        const slots = lw.schedule[String(d2)] || lw.schedule[d2] || [];
+        const txt = Array.isArray(slots) && slots.length
+          ? slots.map(s => typeof s === 'string' ? s : ((s.start || s.from || '') + '-' + (s.end || s.to || ''))).join(' / ')
+          : '-';
+        html += '<td>' + txt + '</td>';
+      }
+      html += '</tr></table>';
+    } else {
+      html += '<p style="color:#999; margin-top:8px; font-size:13px"><em>Sin agenda definida</em></p>';
+    }
+    if (lw.upcoming_appointments && lw.upcoming_appointments.length) {
+      html += '<div style="margin-top:10px; font-size:12px; color:#666">Proximas citas: ' + lw.upcoming_appointments.length + '</div>';
+    }
+    html += '</div>';
+  }
+  list.innerHTML = html;
+}
+
+loadConfig();
+</script>
+</body></html>"""

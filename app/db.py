@@ -1432,15 +1432,26 @@ def _migrate() -> None:
 
         # Defaults de wa_config (idempotente)
         defaults_wa = {
+            # ── Modo y horario ───────────────────────────────────────────
             "mode_global": "hibrido",         # ia | humano | hibrido
-            "office_hours_start": "08:00",
+            "office_hours_start": "14:00",    # default: tarde 2pm-6pm
             "office_hours_end": "18:00",
             "office_days": "1,2,3,4,5",       # lun-vie (1=lun .. 7=dom)
             "mode_outside_hours": "ia",
+            "timezone": "America/Bogota",
             "evolution_instance": "abogados-hseq",
-            # Identidad humana del asistente — mantener consistente en todos los mensajes
+            "ai_disabled": "0",
+            "escalation_wa_group": "",        # JID grupo despacho (vacío = sin push WA)
+
+            # ── Identidad del asistente ──────────────────────────────────
             "asistente_nombre": "María Camila",
             "asistente_cargo": "asistente del despacho Galeano Herrera Abogados",
+            "asistente_genero": "femenino",   # femenino | masculino | neutro
+            "tono": "cercano",                # cercano | formal | tecnico
+            "despacho_nombre": "Galeano Herrera Abogados",
+            "ciudad_principal": "Bogotá",
+
+            # ── Mensajes plantilla ───────────────────────────────────────
             "welcome_message": (
                 "Hola, te saluda María Camila del despacho Galeano Herrera Abogados. "
                 "Cuéntame con calma qué te está pasando y vemos cómo te ayudamos."
@@ -1449,14 +1460,36 @@ def _migrate() -> None:
                 "Hola, te respondo apenas tenga un momento. Cuéntame mientras qué "
                 "necesitas y mañana a primera hora te confirmo todo."
             ),
-            "escalation_wa_group": "",
-            "ai_disabled": "0",
-            # Anti-ban / humanización
+            "escalation_message": (
+                "Te paso con uno de los abogados para que te dé respuesta más detallada. "
+                "Te escribe en un momento."
+            ),
+            "cierre_cita_message": (
+                "Perfecto, dejé apuntada tu cita. En un momento te confirmo qué abogado "
+                "te va a atender y te recuerdo el día antes."
+            ),
+
+            # ── Servicios ofrecidos (lo que la IA puede mencionar) ───────
+            # Lista separada por '|' con formato 'titulo::descripcion_corta'
+            "servicios": (
+                "Tutelas en salud y pensión::EPS, Colpensiones, derecho de petición, mínimo vital"
+                "|Accidentes de tránsito::SOAT, indemnización por incapacidad, lucro cesante"
+                "|Comparendos y fotomultas::nulidad por falta de notificación, levantamiento de embargos"
+                "|Reclamaciones laborales::despido en fuero, contrato realidad, no pago de salarios y prestaciones"
+            ),
+
+            # ── Política de cita ─────────────────────────────────────────
+            "cita_duracion_min": "20",
+            "cita_modalidad": "llamada o videollamada",
+            "cita_costo": "gratuita la primera consulta",
+
+            # ── Anti-ban / humanización ──────────────────────────────────
             "typing_min_ms": "1400",
             "typing_max_ms": "11000",
             "typing_per_word_ms": "230",
-            "pre_thinking_min_ms": "1000",    # pausa antes de "leer y procesar"
+            "pre_thinking_min_ms": "1000",
             "pre_thinking_max_ms": "2500",
+            "max_segmentos_por_turno": "3",   # máximo de mensajes que María Camila envía seguidos
         }
         for k, v in defaults_wa.items():
             c.execute("INSERT OR IGNORE INTO wa_config(key,value) VALUES(?,?)", (k, v))

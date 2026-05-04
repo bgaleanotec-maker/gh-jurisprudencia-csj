@@ -76,14 +76,14 @@ def _get_genai():
 # ─── Prompt principal (combina clasificación + extracción + respuesta) ──────
 
 PROMPT_TEMPLATE = """\
-Eres MARÍA CAMILA, asistente del despacho jurídico colombiano "Galeano Herrera | Abogados".
-Atiendes el WhatsApp del despacho. Eres cercana, paciente, escuchas bien y haces sentir al
-cliente que está siendo entendido. Hablas como una colombiana de Bogotá: clara, calida,
-profesional pero sin tecnicismos.
+Eres {asistente_nombre}, {asistente_cargo}.
+Atiendes el WhatsApp del despacho. Eres {tono_descriptor}. Escuchas bien y haces
+sentir al cliente que está siendo entendido. Hablas como {articulo_indef}{genero_a} colombian{genero_a}
+de {ciudad_principal}: clar{genero_a}, cálid{genero_a}, profesional pero sin tecnicismos.
 
 ══════════════════════════════════ IDENTIDAD ══════════════════════════════════
-TU NOMBRE: María Camila (lo dices solo si te preguntan o en el primer saludo del día)
-TU CARGO: "asistente del despacho Galeano Herrera Abogados"
+TU NOMBRE: {asistente_nombre} (lo dices solo si te preguntan o en el primer saludo del día)
+TU CARGO: "{asistente_cargo}"
 NUNCA digas: "soy una IA", "soy un asistente virtual", "soy un bot", "soy automatizada",
              "modelo de lenguaje", "no soy humana", "estoy programada".
 Si el cliente pregunta "¿eres una persona/IA/bot?":
@@ -128,11 +128,20 @@ ESTADO DEL LEAD: {estado}
 VERTICAL SOSPECHADO: {vertical}
 DATOS YA CAPTURADOS: {datos_capturados_json}
 
-══════════════════════════════════ VERTICALES ══════════════════════════════════
+══════════════════════════════════ SERVICIOS QUE OFRECE EL DESPACHO ════════════
+{servicios_block}
+
+VERTICALES INTERNOS (úsalos en el campo 'datos.vertical' del JSON):
 - tutelas       → salud, pensión, derecho de petición, mínimo vital, EPS, Colpensiones
 - accidentes    → SOAT, accidente de tránsito, indemnización, lucro cesante
 - comparendos   → fotomultas, multas tránsito, cobro coactivo, SIMIT, embargos por multa
 - laboral       → despido, fuero materno/salud, contrato realidad, acoso, no pago de salarios
+
+══════════════════════════════════ POLÍTICA DE CITA ══════════════════════════════
+- Duración: {cita_duracion_min} minutos
+- Modalidad: {cita_modalidad}
+- Costo: {cita_costo}
+- Horario disponible: {office_days_str} de {office_hours_start} a {office_hours_end} ({timezone})
 
 ══════════════════════════════════ HISTORIAL ══════════════════════════════════
 {history_block}
@@ -180,6 +189,94 @@ Responde EXCLUSIVAMENTE con JSON válido (sin markdown, sin texto extra) con est
 
 Si modo='humano' o intención FUERA_DE_TEMA / QUEJA: usa respuestas=[].
 """
+
+
+# ─── Helpers para construir el prompt desde wa_config ────────────────────────
+
+_DAY_NAMES = {1: "lunes", 2: "martes", 3: "miércoles", 4: "jueves",
+              5: "viernes", 6: "sábado", 7: "domingo"}
+
+
+def _format_office_days(days_str: str) -> str:
+    """'1,2,3,4,5' → 'lunes a viernes'. '1,3,5' → 'lunes, miércoles y viernes'."""
+    try:
+        nums = sorted({int(x.strip()) for x in (days_str or "").split(",") if x.strip()})
+    except Exception:
+        nums = [1, 2, 3, 4, 5]
+    if not nums:
+        return "lunes a viernes"
+    # Caso típico contiguo
+    if nums == list(range(nums[0], nums[-1] + 1)) and len(nums) >= 2:
+        return f"{_DAY_NAMES[nums[0]]} a {_DAY_NAMES[nums[-1]]}"
+    nombres = [_DAY_NAMES.get(n, str(n)) for n in nums]
+    if len(nombres) == 1:
+        return nombres[0]
+    return ", ".join(nombres[:-1]) + " y " + nombres[-1]
+
+
+def _format_servicios(servicios_str: str) -> str:
+    """Convierte 'titulo::desc|titulo2::desc2' en bullets para el prompt."""
+    if not servicios_str:
+        return "- (configurar servicios desde admin)"
+    items = []
+    for it in servicios_str.split("|"):
+        it = it.strip()
+        if not it:
+            continue
+        if "::" in it:
+            t, d = it.split("::", 1)
+            items.append(f"- {t.strip()} → {d.strip()}")
+        else:
+            items.append(f"- {it}")
+    return "\n".join(items) if items else "- (sin servicios configurados)"
+
+
+_TONO_DESCRIPTORES = {
+    "cercano": "cercana, paciente, cálida",
+    "formal": "formal, profesional, respetuosa",
+    "tecnico": "técnica, precisa, jurídica",
+}
+
+
+def _build_prompt(conv: dict, modo: str, datos_actuales: dict,
+                  history_block: str, text: str, cfg: dict) -> str:
+    """Construye el prompt usando los valores actuales de wa_config."""
+    nombre = cfg.get("asistente_nombre", "María Camila")
+    cargo = cfg.get("asistente_cargo", "asistente del despacho")
+    genero = (cfg.get("asistente_genero", "femenino") or "femenino").lower()
+    tono = (cfg.get("tono", "cercano") or "cercano").lower()
+    ciudad = cfg.get("ciudad_principal", "Bogotá")
+    servicios = _format_servicios(cfg.get("servicios", ""))
+
+    if genero == "femenino":
+        genero_a, articulo_indef = "a", "una "
+    elif genero == "masculino":
+        genero_a, articulo_indef = "o", "un "
+    else:
+        genero_a, articulo_indef = "x", ""
+
+    return PROMPT_TEMPLATE.format(
+        asistente_nombre=nombre,
+        asistente_cargo=cargo,
+        tono_descriptor=_TONO_DESCRIPTORES.get(tono, _TONO_DESCRIPTORES["cercano"]),
+        genero_a=genero_a,
+        articulo_indef=articulo_indef,
+        ciudad_principal=ciudad,
+        modo=modo,
+        estado=conv.get("estado", "lead_nuevo"),
+        vertical=datos_actuales.get("vertical", "(desconocido)"),
+        datos_capturados_json=json.dumps(datos_actuales, ensure_ascii=False),
+        servicios_block=servicios,
+        cita_duracion_min=cfg.get("cita_duracion_min", "20"),
+        cita_modalidad=cfg.get("cita_modalidad", "llamada"),
+        cita_costo=cfg.get("cita_costo", "gratuita la primera consulta"),
+        office_days_str=_format_office_days(cfg.get("office_days", "1,2,3,4,5")),
+        office_hours_start=cfg.get("office_hours_start", "08:00"),
+        office_hours_end=cfg.get("office_hours_end", "18:00"),
+        timezone=cfg.get("timezone", "America/Bogota"),
+        history_block=history_block,
+        text=text[:1000],
+    )
 
 
 def _format_history(msgs: list[dict]) -> str:
@@ -388,14 +485,7 @@ def procesar_mensaje_entrante(
         }
 
     datos_actuales = conv.get("datos_capturados") or {}
-    prompt = PROMPT_TEMPLATE.format(
-        modo=modo,
-        estado=conv.get("estado", "lead_nuevo"),
-        vertical=datos_actuales.get("vertical", "(desconocido)"),
-        datos_capturados_json=json.dumps(datos_actuales, ensure_ascii=False),
-        history_block=history_block,
-        text=(text or "")[:1000],
-    )
+    prompt = _build_prompt(conv, modo, datos_actuales, history_block, text or "", cfg)
 
     out = _llamar_gemini_json(prompt, max_tokens=800)
     if not out:

@@ -717,6 +717,141 @@ async def admin_config():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# WA ADMIN — Configuración del módulo WhatsApp / María Camila
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Whitelist de keys editables (no exponer ni dejar setear claves arbitrarias)
+_WA_CFG_EDITABLE = {
+    # Modo y horario
+    "mode_global", "office_hours_start", "office_hours_end", "office_days",
+    "mode_outside_hours", "timezone", "ai_disabled", "escalation_wa_group",
+    # Identidad
+    "asistente_nombre", "asistente_cargo", "asistente_genero", "tono",
+    "despacho_nombre", "ciudad_principal",
+    # Mensajes plantilla
+    "welcome_message", "outside_hours_message", "escalation_message",
+    "cierre_cita_message",
+    # Servicios
+    "servicios",
+    # Política de cita
+    "cita_duracion_min", "cita_modalidad", "cita_costo",
+    # Anti-ban
+    "typing_min_ms", "typing_max_ms", "typing_per_word_ms",
+    "pre_thinking_min_ms", "pre_thinking_max_ms", "max_segmentos_por_turno",
+}
+
+
+class WaConfigUpdate(BaseModel):
+    """Body del PUT: dict de pares key=value. Solo se aceptan keys whitelisted."""
+    items: dict
+
+
+@app.get("/api/admin/wa/config", dependencies=[Depends(admin_auth)])
+async def admin_wa_config_get():
+    cfg = db_mod.wa_config_get_all()
+    # devolver solo keys editables (oculta keys internas/secretas si llegan a existir)
+    return {"config": {k: cfg.get(k, "") for k in sorted(_WA_CFG_EDITABLE)}}
+
+
+@app.put("/api/admin/wa/config", dependencies=[Depends(admin_auth)])
+async def admin_wa_config_put(body: WaConfigUpdate):
+    if not isinstance(body.items, dict):
+        raise HTTPException(400, "items debe ser dict")
+    invalid = [k for k in body.items if k not in _WA_CFG_EDITABLE]
+    if invalid:
+        raise HTTPException(400, f"keys no permitidas: {invalid}")
+
+    # Validaciones específicas
+    items = {}
+    for k, v in body.items.items():
+        v = "" if v is None else str(v)
+        # Sanitizaciones básicas por key
+        if k == "mode_global" and v not in ("ia", "humano", "hibrido"):
+            raise HTTPException(400, "mode_global debe ser ia|humano|hibrido")
+        if k == "mode_outside_hours" and v not in ("ia", "humano"):
+            raise HTTPException(400, "mode_outside_hours debe ser ia|humano")
+        if k == "asistente_genero" and v not in ("femenino", "masculino", "neutro"):
+            raise HTTPException(400, "genero debe ser femenino|masculino|neutro")
+        if k == "tono" and v not in ("cercano", "formal", "tecnico"):
+            raise HTTPException(400, "tono debe ser cercano|formal|tecnico")
+        if k == "ai_disabled" and v not in ("0", "1"):
+            raise HTTPException(400, "ai_disabled debe ser 0|1")
+        if k.endswith("_ms") or k == "max_segmentos_por_turno" or k == "cita_duracion_min":
+            try:
+                int(v)
+            except ValueError:
+                raise HTTPException(400, f"{k} debe ser entero")
+        items[k] = v
+
+    db_mod.wa_config_bulk_set(items)
+    return {"ok": True, "updated": len(items), "keys": list(items.keys())}
+
+
+@app.get("/api/admin/wa/conversations", dependencies=[Depends(admin_auth)])
+async def admin_wa_conversations(estado: Optional[str] = Query(None), limit: int = Query(50, le=200)):
+    convs = db_mod.wa_conv_list(estado=estado, limit=limit)
+    return {"items": convs, "count": len(convs)}
+
+
+@app.get("/api/admin/wa/conversations/{conv_id}", dependencies=[Depends(admin_auth)])
+async def admin_wa_conversation_detail(conv_id: int):
+    msgs = db_mod.wa_msg_history(conv_id, limit=200)
+    return {"conversation_id": conv_id, "messages": msgs, "count": len(msgs)}
+
+
+class WaConvModeUpdate(BaseModel):
+    modo: str = Field(..., pattern=r"^(auto|ia|humano)$")
+
+
+@app.post("/api/admin/wa/conversations/{conv_id}/mode", dependencies=[Depends(admin_auth)])
+async def admin_wa_conv_mode(conv_id: int, body: WaConvModeUpdate):
+    db_mod.wa_conv_update(conv_id, modo=body.modo)
+    return {"ok": True, "modo": body.modo}
+
+
+@app.get("/api/admin/wa/escalations", dependencies=[Depends(admin_auth)])
+async def admin_wa_escalations():
+    return {"items": db_mod.wa_escalations_pending(limit=100)}
+
+
+@app.get("/api/admin/lawyers/schedules", dependencies=[Depends(admin_auth)])
+async def admin_lawyers_schedules():
+    """Devuelve calendarios de todos los abogados para el módulo de configuración."""
+    out = []
+    for lw in db_mod.list_lawyers():
+        lid = lw["id"]
+        sched = lw.get("schedule")
+        try:
+            sched_obj = __import__("json").loads(sched) if sched else None
+        except Exception:
+            sched_obj = None
+        # próximas citas
+        try:
+            upcoming = ag.lawyer_upcoming(lid, days=14) if hasattr(ag, "lawyer_upcoming") else []
+        except Exception:
+            upcoming = []
+        out.append({
+            "id": lid,
+            "name": lw.get("name"),
+            "email": lw.get("email"),
+            "whatsapp": lw.get("whatsapp"),
+            "areas": lw.get("areas"),
+            "active": lw.get("active"),
+            "available": lw.get("available"),
+            "role": lw.get("role"),
+            "schedule": sched_obj,
+            "upcoming_appointments": upcoming,
+        })
+    return {"items": out, "count": len(out)}
+
+
+@app.get("/admin/wa", response_class=HTMLResponse, dependencies=[Depends(admin_auth)])
+async def admin_wa_page():
+    """UI HTML del módulo de configuración WhatsApp."""
+    return ui_mod.admin_wa_html()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PRO — Login + Dashboard del abogado
 # ─────────────────────────────────────────────────────────────────────────────
 
