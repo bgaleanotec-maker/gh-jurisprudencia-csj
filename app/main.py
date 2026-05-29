@@ -1466,6 +1466,20 @@ async def public_landing_slug(slug: str, request: Request,
     return ui_mod.landing_html(config=cfg)
 
 
+@app.get("/preview/{slug}", response_class=HTMLResponse)
+async def preview_landing_v2(slug: str, request: Request):
+    """Preview del nuevo diseño v2 (Lujo institucional cercano).
+
+    NO afecta /c/{slug} en producción. Solo para que el admin valide la dirección
+    visual antes del swap definitivo.
+    """
+    cfg = db_mod.get_landing_by_slug(slug)
+    if not cfg:
+        raise HTTPException(404, f"Landing '{slug}' no encontrada")
+    from app import ui_v2 as ui2
+    return ui2.landing_v2_html(config=cfg)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CEREBRO RAG: carga, transformación con IA y administración de PDFs
 # ─────────────────────────────────────────────────────────────────────────────
