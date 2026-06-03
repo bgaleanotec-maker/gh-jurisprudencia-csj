@@ -1480,6 +1480,39 @@ async def preview_landing_v2(slug: str, request: Request):
     return ui2.landing_v2_html(config=cfg)
 
 
+@app.get("/preview/internal/{page}", response_class=HTMLResponse)
+async def preview_internal(page: str):
+    """Preview de las pantallas internas remasterizadas (sin auth).
+
+    Pages disponibles:
+      - login       → lawyer_login_html_v3
+      - admin       → admin_html_v3
+      - dashboard   → lawyer_dashboard_html_v3 (con abogado fake)
+      - workspace   → lawyer_workspace_html_v3 (con lead fake)
+      - expediente  → expediente_aceptar_html_v3
+    """
+    from app import ui_internal as ui_i
+    if page == "login":
+        return ui_i.lawyer_login_html_v3()
+    if page == "admin":
+        return ui_i.admin_html_v3()
+    if page == "dashboard":
+        fake_lawyer = {"id": 1, "name": "Dr. Juan Galeano"}
+        return ui_i.lawyer_dashboard_html_v3(fake_lawyer)
+    if page == "workspace":
+        fake_lawyer = {"id": 1, "name": "Dr. Juan Galeano"}
+        fake_lead = {
+            "id": 42, "name": "Carmen Rodríguez", "phone": "573001234567",
+            "cedula": "1018456789", "email": "carmen@email.com",
+            "descripcion": "Mi EPS Sanitas lleva 3 meses sin autorizarme la cirugía de rodilla. Ya presenté derecho de petición y no me responden.",
+            "area": "tutelas", "status": "verified",
+        }
+        return ui_i.lawyer_workspace_html_v3(fake_lawyer, fake_lead)
+    if page == "expediente":
+        return ui_i.expediente_aceptar_html_v3(token="demo-token-abc123")
+    raise HTTPException(404, f"Preview page '{page}' no existe. Usa: login | admin | dashboard | workspace | expediente")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CEREBRO RAG: carga, transformación con IA y administración de PDFs
 # ─────────────────────────────────────────────────────────────────────────────
